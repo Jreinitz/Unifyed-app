@@ -26,6 +26,8 @@ async function redisPluginCallback(fastify: FastifyInstance) {
   const connection = { 
     host: redisUrl.hostname || 'localhost', 
     port: parseInt(redisUrl.port || '6379', 10),
+    password: redisUrl.password || undefined,
+    username: redisUrl.username || undefined,
   };
   
   const queues = {
