@@ -206,10 +206,13 @@ export async function authRoutes(fastify: FastifyInstance) {
   fastify.post('/logout', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
-    // Delete current session
-    await fastify.db
-      .delete(sessions)
-      .where(eq(sessions.id, request.user.sessionId));
+    // Delete current session (legacy auth only)
+    const sessionId = request.user.sessionId;
+    if (sessionId) {
+      await fastify.db
+        .delete(sessions)
+        .where(eq(sessions.id, sessionId));
+    }
 
     return reply.send({ success: true });
   });
