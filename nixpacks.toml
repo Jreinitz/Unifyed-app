@@ -5,7 +5,20 @@ nixPkgs = ["nodejs_20", "nodePackages.pnpm"]
 cmds = ["pnpm install"]
 
 [phases.build]
-cmds = ["pnpm --filter=@unifyed/db build", "pnpm --filter=@unifyed/api build"]
+cmds = [
+  "pnpm --filter=@unifyed/types build",
+  "pnpm --filter=@unifyed/utils build", 
+  "pnpm --filter=@unifyed/db build",
+  "pnpm --filter=@unifyed/events build",
+  "pnpm --filter=@unifyed/chat build",
+  "pnpm --filter=@unifyed/restream build",
+  "pnpm --filter=@unifyed/shopify build",
+  "pnpm --filter=@unifyed/stripe build",
+  "pnpm --filter=@unifyed/tiktok build",
+  "pnpm --filter=@unifyed/twitch build",
+  "pnpm --filter=@unifyed/youtube build",
+  "pnpm --filter=@unifyed/api build"
+]
 
 [start]
 cmd = "node apps/api/dist/index.js"
