@@ -1,0 +1,37 @@
+{
+  "name": "@unifyed/worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@unifyed/db": "workspace:*",
+    "@unifyed/types": "workspace:*",
+    "@unifyed/events": "workspace:*",
+    "@unifyed/utils": "workspace:*",
+    "@unifyed/integrations-restream": "workspace:*",
+    "@unifyed/integrations-youtube": "workspace:*",
+    "@unifyed/integrations-twitch": "workspace:*",
+    "@unifyed/integrations-tiktok": "workspace:*",
+    "bullmq": "^5.34.3",
+    "ioredis": "^5.4.2",
+    "dotenv": "^16.4.7",
+    "zod": "^3.24.1",
+    "drizzle-orm": "^0.38.3",
+    "tiktok-live-connector": "^2.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
