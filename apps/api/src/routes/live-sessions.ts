@@ -260,7 +260,7 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
             id: broadcast.id,
             title: broadcast.title,
             status: broadcast.status,
-            channels: broadcast.channels.filter(ch => ch.active).map(ch => ({
+            channels: broadcast.channels.filter((ch: { active: boolean }) => ch.active).map((ch: { platform: string; name: string }) => ({
               platform: ch.platform,
               name: ch.name,
             })),
@@ -329,12 +329,12 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
         credentials.accessToken
       );
 
-      const enabledChannels = channels.filter(ch => ch.enabled && ch.connected);
+      const enabledChannels = channels.filter((ch: { enabled: boolean; connected: boolean }) => ch.enabled && ch.connected);
 
       return reply.send({
         rtmpUrl: settings.rtmpUrl,
         streamKey: settings.streamKey,
-        platforms: enabledChannels.map(ch => ({
+        platforms: enabledChannels.map((ch: { platform: string; displayName: string }) => ({
           platform: ch.platform,
           displayName: ch.displayName,
         })),

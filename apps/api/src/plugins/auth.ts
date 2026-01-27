@@ -18,8 +18,9 @@ declare module 'fastify' {
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { sub: string; email: string };
-    user: { sub: string; email: string };
+    // Support both Supabase JWT format and legacy format
+    payload: { sub: string; email: string } | { creatorId: string; sessionId: string };
+    user: { sub: string; email: string; sessionId?: string };
   }
 }
 
@@ -64,7 +65,7 @@ async function authPluginCallback(fastify: FastifyInstance) {
         .values({
           id: user.id,
           email: user.email || '',
-          name: user.user_metadata?.name || user.user_metadata?.full_name || 'Creator',
+          name: user.user_metadata?.['name'] || user.user_metadata?.['full_name'] || 'Creator',
           isActive: true,
         })
         .returning({

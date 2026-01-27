@@ -11,12 +11,12 @@ cmds = [
   "pnpm --filter=@unifyed/db build",
   "pnpm --filter=@unifyed/events build",
   "pnpm --filter=@unifyed/chat build",
-  "pnpm --filter=@unifyed/restream build",
-  "pnpm --filter=@unifyed/shopify build",
-  "pnpm --filter=@unifyed/stripe build",
-  "pnpm --filter=@unifyed/tiktok build",
-  "pnpm --filter=@unifyed/twitch build",
-  "pnpm --filter=@unifyed/youtube build",
+  "pnpm --filter=@unifyed/integrations-restream build",
+  "pnpm --filter=@unifyed/integrations-shopify build",
+  "pnpm --filter=@unifyed/integrations-stripe build",
+  "pnpm --filter=@unifyed/integrations-tiktok build",
+  "pnpm --filter=@unifyed/integrations-twitch build",
+  "pnpm --filter=@unifyed/integrations-youtube build",
   "pnpm --filter=@unifyed/api build"
 ]
 
