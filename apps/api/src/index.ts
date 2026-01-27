@@ -28,9 +28,12 @@ import { env } from './config/env.js';
 async function start() {
   const app = await buildApp();
 
+  // Railway provides PORT, use it if available, otherwise use API_PORT
+  const port = env.PORT || env.API_PORT;
+  
   try {
-    await app.listen({ port: env.API_PORT, host: env.API_HOST });
-    console.log(`🚀 Unifyed API running on http://${env.API_HOST}:${env.API_PORT}`);
+    await app.listen({ port, host: env.API_HOST });
+    console.log(`🚀 Unifyed API running on http://${env.API_HOST}:${port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

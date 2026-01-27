@@ -10,6 +10,8 @@ const envSchema = z.object({
   REDIS_URL: z.string().url(),
   
   // API Server
+  // Railway provides PORT, fallback to API_PORT for local dev
+  PORT: z.coerce.number().optional(),
   API_PORT: z.coerce.number().default(3001),
   API_HOST: z.string().default('0.0.0.0'),
   
