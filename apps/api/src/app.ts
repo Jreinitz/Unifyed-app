@@ -47,8 +47,18 @@ export async function buildApp() {
 
   // Security
   await app.register(helmet);
+  
+  // CORS - allow multiple frontend origins in production
+  const allowedOrigins = env.NODE_ENV === 'production'
+    ? [
+        env.APP_URL,
+        'https://unifyed-app-web.vercel.app',
+        'https://app.unifyed.io',
+      ].filter(Boolean)
+    : true;
+  
   await app.register(cors, {
-    origin: env.NODE_ENV === 'production' ? env.APP_URL : true,
+    origin: allowedOrigins,
     credentials: true,
   });
 
