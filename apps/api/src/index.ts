@@ -1,3 +1,7 @@
+// Force IPv4 DNS resolution - Railway doesn't support IPv6 outbound
+import { setDefaultResultOrder } from 'dns';
+setDefaultResultOrder('ipv4first');
+
 import * as dotenv from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
