@@ -49,16 +49,26 @@ export async function buildApp() {
   await app.register(helmet);
   
   // CORS - allow multiple frontend origins in production
-  const allowedOrigins = env.NODE_ENV === 'production'
-    ? [
-        env.APP_URL,
-        'https://unifyed-app-web.vercel.app',
-        'https://app.unifyed.io',
-      ].filter(Boolean)
-    : true;
+  const allowedOrigins = new Set([
+    env.APP_URL,
+    'https://unifyed-app-web.vercel.app',
+    'https://app.unifyed.io',
+  ].filter(Boolean));
   
   await app.register(cors, {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin || env.NODE_ENV !== 'production') {
+        callback(null, true);
+        return;
+      }
+      // Check if origin is in allowed list
+      if (allowedOrigins.has(origin)) {
+        callback(null, origin);
+        return;
+      }
+      callback(new Error('Not allowed by CORS'), false);
+    },
     credentials: true,
   });
 
