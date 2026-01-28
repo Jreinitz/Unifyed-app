@@ -235,10 +235,10 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
 
       // Create new Connect account
       const { account, onboardingUrl } = await stripeIntegration.createConnectAccount({
-        email: creator.email,
+        email: profile.email,
         metadata: {
-          creator_id: creator.id,
-          creator_handle: creator.handle ?? '',
+          creator_id: profile.id,
+          creator_handle: profile.handle ?? '',
         },
         refreshUrl: `${env.APP_URL}/settings/payments?refresh=true`,
         returnUrl: `${env.APP_URL}/settings/payments?connected=true`,
