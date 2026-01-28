@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { checkoutSessions, orders, creators } from '@unifyed/db/schema';
+import { checkoutSessions, orders, creators, profiles } from '@unifyed/db/schema';
 import * as stripeIntegration from '@unifyed/integrations-stripe';
 import { AppError, ErrorCodes } from '@unifyed/utils';
 import { authPlugin } from '../plugins/auth.js';
@@ -189,19 +189,19 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
 
     // POST /payments/connect/onboard - Start Connect onboarding
     fastify.post('/connect/onboard', async (request, reply) => {
-      // Get full creator with metadata
-      const [creator] = await fastify.db
+      // Get full profile with metadata
+      const [profile] = await fastify.db
         .select()
-        .from(creators)
-        .where(eq(creators.id, request.creator.id))
+        .from(profiles)
+        .where(eq(profiles.id, request.creator.id))
         .limit(1);
 
-      if (!creator) {
-        throw new AppError(ErrorCodes.NOT_FOUND, 'Creator not found');
+      if (!profile) {
+        throw new AppError(ErrorCodes.NOT_FOUND, 'Profile not found');
       }
 
-      const creatorMetadata = creator.metadata as Record<string, unknown> | null;
-      const existingAccountId = creatorMetadata?.['stripeConnectAccountId'] as string | undefined;
+      const profileMetadata = profile.metadata as Record<string, unknown> | null;
+      const existingAccountId = profileMetadata?.['stripeConnectAccountId'] as string | undefined;
 
       if (existingAccountId) {
         // Check account status
@@ -244,17 +244,17 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
         returnUrl: `${env.APP_URL}/settings/payments?connected=true`,
       });
 
-      // Save Connect account ID to creator metadata
+      // Save Connect account ID to profile metadata
       await fastify.db
-        .update(creators)
+        .update(profiles)
         .set({
           metadata: {
-            ...creatorMetadata,
+            ...profileMetadata,
             stripeConnectAccountId: account.id,
           },
           updatedAt: new Date(),
         })
-        .where(eq(creators.id, creator.id));
+        .where(eq(profiles.id, profile.id));
 
       return reply.send({
         status: 'created',
@@ -266,19 +266,19 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
 
     // GET /payments/connect/status - Get Connect account status
     fastify.get('/connect/status', async (request, reply) => {
-      // Get full creator with metadata
-      const [creator] = await fastify.db
+      // Get full profile with metadata
+      const [profile] = await fastify.db
         .select()
-        .from(creators)
-        .where(eq(creators.id, request.creator.id))
+        .from(profiles)
+        .where(eq(profiles.id, request.creator.id))
         .limit(1);
 
-      if (!creator) {
-        throw new AppError(ErrorCodes.NOT_FOUND, 'Creator not found');
+      if (!profile) {
+        throw new AppError(ErrorCodes.NOT_FOUND, 'Profile not found');
       }
 
-      const creatorMetadata = creator.metadata as Record<string, unknown> | null;
-      const accountId = creatorMetadata?.['stripeConnectAccountId'] as string | undefined;
+      const profileMetadata = profile.metadata as Record<string, unknown> | null;
+      const accountId = profileMetadata?.['stripeConnectAccountId'] as string | undefined;
 
       if (!accountId) {
         return reply.send({
@@ -309,19 +309,19 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
 
     // GET /payments/connect/dashboard - Get link to Stripe dashboard
     fastify.get('/connect/dashboard', async (request, reply) => {
-      // Get full creator with metadata
-      const [creator] = await fastify.db
+      // Get full profile with metadata
+      const [profile] = await fastify.db
         .select()
-        .from(creators)
-        .where(eq(creators.id, request.creator.id))
+        .from(profiles)
+        .where(eq(profiles.id, request.creator.id))
         .limit(1);
 
-      if (!creator) {
-        throw new AppError(ErrorCodes.NOT_FOUND, 'Creator not found');
+      if (!profile) {
+        throw new AppError(ErrorCodes.NOT_FOUND, 'Profile not found');
       }
 
-      const creatorMetadata = creator.metadata as Record<string, unknown> | null;
-      const accountId = creatorMetadata?.['stripeConnectAccountId'] as string | undefined;
+      const profileMetadata = profile.metadata as Record<string, unknown> | null;
+      const accountId = profileMetadata?.['stripeConnectAccountId'] as string | undefined;
 
       if (!accountId) {
         throw new AppError(ErrorCodes.NOT_FOUND, 'No Connect account linked');
@@ -342,35 +342,35 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
 
     // DELETE /payments/connect - Disconnect Connect account
     fastify.delete('/connect', async (request, reply) => {
-      // Get full creator with metadata
-      const [creator] = await fastify.db
+      // Get full profile with metadata
+      const [profile] = await fastify.db
         .select()
-        .from(creators)
-        .where(eq(creators.id, request.creator.id))
+        .from(profiles)
+        .where(eq(profiles.id, request.creator.id))
         .limit(1);
 
-      if (!creator) {
-        throw new AppError(ErrorCodes.NOT_FOUND, 'Creator not found');
+      if (!profile) {
+        throw new AppError(ErrorCodes.NOT_FOUND, 'Profile not found');
       }
 
-      const creatorMetadata = creator.metadata as Record<string, unknown> | null;
-      const accountId = creatorMetadata?.['stripeConnectAccountId'] as string | undefined;
+      const profileMetadata = profile.metadata as Record<string, unknown> | null;
+      const accountId = profileMetadata?.['stripeConnectAccountId'] as string | undefined;
 
       if (!accountId) {
         throw new AppError(ErrorCodes.NOT_FOUND, 'No Connect account linked');
       }
 
       // Remove from our database (don't delete the Stripe account)
-      const updatedMetadata = { ...creatorMetadata };
+      const updatedMetadata = { ...profileMetadata };
       delete updatedMetadata['stripeConnectAccountId'];
 
       await fastify.db
-        .update(creators)
+        .update(profiles)
         .set({
           metadata: updatedMetadata,
           updatedAt: new Date(),
         })
-        .where(eq(creators.id, creator.id));
+        .where(eq(profiles.id, profile.id));
 
       return reply.send({
         success: true,
