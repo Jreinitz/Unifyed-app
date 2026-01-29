@@ -5,10 +5,15 @@ import * as schema from './schema/index.js';
 export type Database = ReturnType<typeof createDatabase>;
 
 export function createDatabase(connectionString: string) {
+  // Check if using Supabase pooler (port 6543 or contains 'pooler')
+  const isPooler = connectionString.includes(':6543') || connectionString.includes('pooler');
+  
   const client = postgres(connectionString, {
     max: 10,
     idle_timeout: 20,
     connect_timeout: 10,
+    // Disable prepared statements when using connection pooler (PgBouncer)
+    prepare: !isPooler,
   });
 
   return drizzle(client, { schema });

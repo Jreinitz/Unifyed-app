@@ -12,7 +12,8 @@ export async function healthRoutes(fastify: FastifyInstance) {
       await fastify.db.execute(sql`SELECT 1`);
       dbStatus = 'connected';
     } catch (err) {
-      request.log.error(err, 'Database health check failed');
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      request.log.error({ err, errorMessage }, 'Database health check failed');
     }
 
     // Check Redis
