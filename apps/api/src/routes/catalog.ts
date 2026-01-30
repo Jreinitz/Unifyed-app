@@ -180,21 +180,163 @@ export async function catalogRoutes(fastify: FastifyInstance) {
       throw new AppError(ErrorCodes.VALIDATION_ERROR, 'Only Shopify connections support catalog sync');
     }
 
-    // Queue sync job
-    const job = await fastify.queues.catalogSync.add(
-      'sync',
-      { connectionId },
-      { 
-        jobId: `manual-sync-${connectionId}-${Date.now()}`,
-        removeOnComplete: true,
+    // Do synchronous sync (worker not required)
+    try {
+      const { decrypt } = await import('@unifyed/utils');
+      const { env } = await import('../config/env.js');
+      
+      // Decrypt credentials
+      const credentials = JSON.parse(
+        decrypt(connection.credentials, env.CREDENTIALS_ENCRYPTION_KEY)
+      ) as { accessToken: string; shopDomain: string };
+      
+      const { accessToken, shopDomain } = credentials;
+      
+      // Fetch products from Shopify
+      const shopifyRes = await fetch(
+        `https://${shopDomain}.myshopify.com/admin/api/2024-01/products.json?limit=250`,
+        {
+          headers: {
+            'X-Shopify-Access-Token': accessToken,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      
+      if (!shopifyRes.ok) {
+        const error = await shopifyRes.text();
+        throw new AppError(ErrorCodes.INTEGRATION_ERROR, `Shopify API error: ${shopifyRes.status} - ${error}`);
       }
-    );
-
-    const response: SyncCatalogResponse = {
-      jobId: job.id ?? 'unknown',
-      message: 'Catalog sync started',
-    };
-
-    return reply.status(202).send(response);
+      
+      interface ShopifyVariant {
+        id: number;
+        title: string;
+        sku: string;
+        barcode: string;
+        price: string;
+        compare_at_price: string | null;
+        inventory_quantity: number;
+        inventory_policy: string;
+        option1: string | null;
+        option2: string | null;
+        option3: string | null;
+        inventory_item_id: number;
+        weight: number;
+        weight_unit: string;
+      }
+      
+      interface ShopifyProduct {
+        id: number;
+        title: string;
+        body_html: string;
+        vendor: string;
+        product_type: string;
+        images: Array<{ src: string }>;
+        variants: ShopifyVariant[];
+      }
+      
+      const data = (await shopifyRes.json()) as { products: ShopifyProduct[] };
+      
+      request.log.info(`Fetched ${data.products.length} products from Shopify`);
+      
+      // Import products and variants
+      for (const shopifyProduct of data.products) {
+        const [product] = await fastify.db
+          .insert(products)
+          .values({
+            connectionId,
+            externalId: String(shopifyProduct.id),
+            title: shopifyProduct.title,
+            description: shopifyProduct.body_html,
+            vendor: shopifyProduct.vendor,
+            productType: shopifyProduct.product_type,
+            imageUrl: shopifyProduct.images[0]?.src ?? null,
+            images: shopifyProduct.images.map((img) => img.src),
+            isActive: true,
+            lastSyncedAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: [products.connectionId, products.externalId],
+            set: {
+              title: shopifyProduct.title,
+              description: shopifyProduct.body_html,
+              vendor: shopifyProduct.vendor,
+              productType: shopifyProduct.product_type,
+              imageUrl: shopifyProduct.images[0]?.src ?? null,
+              images: shopifyProduct.images.map((img) => img.src),
+              lastSyncedAt: new Date(),
+              updatedAt: new Date(),
+            },
+          })
+          .returning();
+        
+        if (!product) continue;
+        
+        // Upsert variants
+        for (const shopifyVariant of shopifyProduct.variants) {
+          await fastify.db
+            .insert(variants)
+            .values({
+              productId: product.id,
+              externalId: String(shopifyVariant.id),
+              title: shopifyVariant.title,
+              sku: shopifyVariant.sku || null,
+              barcode: shopifyVariant.barcode || null,
+              price: Math.round(parseFloat(shopifyVariant.price) * 100),
+              compareAtPrice: shopifyVariant.compare_at_price
+                ? Math.round(parseFloat(shopifyVariant.compare_at_price) * 100)
+                : null,
+              inventoryQuantity: shopifyVariant.inventory_quantity,
+              inventoryPolicy: shopifyVariant.inventory_policy,
+              option1: shopifyVariant.option1,
+              option2: shopifyVariant.option2,
+              option3: shopifyVariant.option3,
+              inventoryItemId: String(shopifyVariant.inventory_item_id),
+              weight: String(shopifyVariant.weight),
+              weightUnit: shopifyVariant.weight_unit,
+              isActive: true,
+            })
+            .onConflictDoUpdate({
+              target: [variants.externalId],
+              set: {
+                title: shopifyVariant.title,
+                sku: shopifyVariant.sku || null,
+                barcode: shopifyVariant.barcode || null,
+                price: Math.round(parseFloat(shopifyVariant.price) * 100),
+                compareAtPrice: shopifyVariant.compare_at_price
+                  ? Math.round(parseFloat(shopifyVariant.compare_at_price) * 100)
+                  : null,
+                inventoryQuantity: shopifyVariant.inventory_quantity,
+                inventoryPolicy: shopifyVariant.inventory_policy,
+                option1: shopifyVariant.option1,
+                option2: shopifyVariant.option2,
+                option3: shopifyVariant.option3,
+                updatedAt: new Date(),
+              },
+            });
+        }
+      }
+      
+      // Update connection sync timestamp
+      await fastify.db
+        .update(platformConnections)
+        .set({
+          lastSyncAt: new Date(),
+          status: 'healthy',
+          lastError: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(platformConnections.id, connectionId));
+      
+      const response: SyncCatalogResponse = {
+        jobId: `sync-${connectionId}-${Date.now()}`,
+        message: `Catalog sync completed. Imported ${data.products.length} products.`,
+      };
+      
+      return reply.send(response);
+    } catch (err) {
+      request.log.error(err, 'Catalog sync error');
+      throw err;
+    }
   });
 }

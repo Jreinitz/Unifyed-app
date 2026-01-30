@@ -67,24 +67,45 @@ export default function ProductsPage() {
   const handleSync = async () => {
     try {
       setSyncing(true);
+      setError(null);
       const token = localStorage.getItem('token');
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
+      // First, get the Shopify connection
+      const connectionsRes = await fetch(`${apiUrl}/connections`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      if (!connectionsRes.ok) {
+        throw new Error('Failed to fetch connections');
+      }
+      
+      const connectionsData = await connectionsRes.json();
+      const shopifyConnection = connectionsData.connections?.find(
+        (c: { platform: string; status: string }) => c.platform === 'shopify' && (c.status === 'healthy' || c.status === 'connected')
+      );
+      
+      if (!shopifyConnection) {
+        throw new Error('No Shopify connection found. Please connect your Shopify store first.');
+      }
+      
+      // Trigger sync with connectionId
       const res = await fetch(`${apiUrl}/catalog/sync`, {
         method: 'POST',
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: '{}',
+        body: JSON.stringify({ connectionId: shopifyConnection.id }),
       });
 
       if (!res.ok) {
-        throw new Error('Failed to sync products');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'Failed to sync products');
       }
 
-      // Wait a bit then refresh
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for sync to complete then refresh
+      await new Promise(resolve => setTimeout(resolve, 3000));
       fetchProducts();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sync');
