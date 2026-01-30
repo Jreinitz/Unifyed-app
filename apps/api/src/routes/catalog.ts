@@ -9,8 +9,9 @@ import {
   type GetProductResponse,
   type SyncCatalogResponse,
 } from '@unifyed/types/api';
-import { AppError, ErrorCodes } from '@unifyed/utils';
+import { AppError, ErrorCodes, decrypt } from '@unifyed/utils';
 import { authPlugin } from '../plugins/auth.js';
+import { env } from '../config/env.js';
 
 export async function catalogRoutes(fastify: FastifyInstance) {
   await fastify.register(authPlugin);
@@ -182,9 +183,6 @@ export async function catalogRoutes(fastify: FastifyInstance) {
 
     // Do synchronous sync (worker not required)
     try {
-      const { decrypt } = await import('@unifyed/utils');
-      const { env } = await import('../config/env.js');
-      
       // Decrypt credentials
       const credentials = JSON.parse(
         decrypt(connection.credentials, env.CREDENTIALS_ENCRYPTION_KEY)
