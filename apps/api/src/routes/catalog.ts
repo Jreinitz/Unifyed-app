@@ -303,7 +303,7 @@ export async function catalogRoutes(fastify: FastifyInstance) {
               isActive: true,
             })
             .onConflictDoUpdate({
-              target: [variants.externalId],
+              target: [variants.productId, variants.externalId],
               set: {
                 title: shopifyVariant.title,
                 sku: shopifyVariant.sku || null,

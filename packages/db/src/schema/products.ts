@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, varchar, integer, boolean, jsonb, index, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, varchar, integer, boolean, jsonb, index, numeric, uniqueIndex } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { platformConnections } from './platform-connections.js';
 
@@ -39,7 +39,7 @@ export const products = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    connectionExternalIdx: index('products_connection_external_idx').on(
+    connectionExternalIdx: uniqueIndex('products_connection_external_idx').on(
       table.connectionId,
       table.externalId
     ),
@@ -96,7 +96,7 @@ export const variants = pgTable(
   },
   (table) => ({
     productIdx: index('variants_product_idx').on(table.productId),
-    externalIdx: index('variants_external_idx').on(table.externalId),
+    productExternalIdx: uniqueIndex('variants_product_external_idx').on(table.productId, table.externalId),
     skuIdx: index('variants_sku_idx').on(table.sku),
   })
 );
