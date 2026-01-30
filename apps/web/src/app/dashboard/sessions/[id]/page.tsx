@@ -225,12 +225,12 @@ export default function SessionDetailPage() {
           <StatsCard
             title="Revenue"
             value={formatCurrency(stats.revenue)}
-            change={stats.orders > 0 ? `${stats.orders} order${stats.orders !== 1 ? 's' : ''}` : undefined}
+            subtitle={stats.orders > 0 ? `${stats.orders} order${stats.orders !== 1 ? 's' : ''}` : undefined}
           />
           <StatsCard
             title="Peak Viewers"
             value={session.totalPeakViewers?.toLocaleString() || '0'}
-            change={totalViewersByPlatform > 0 ? `${totalViewersByPlatform.toLocaleString()} total` : undefined}
+            subtitle={totalViewersByPlatform > 0 ? `${totalViewersByPlatform.toLocaleString()} total` : undefined}
           />
           <StatsCard
             title="Duration"
@@ -239,7 +239,7 @@ export default function SessionDetailPage() {
           <StatsCard
             title="Conversion Rate"
             value={`${stats.conversionRate}%`}
-            change={`${stats.checkouts} checkout${stats.checkouts !== 1 ? 's' : ''}`}
+            subtitle={`${stats.checkouts} checkout${stats.checkouts !== 1 ? 's' : ''}`}
           />
           <StatsCard
             title="Avg Order Value"
@@ -365,10 +365,10 @@ export default function SessionDetailPage() {
           <div className="mt-6 bg-white rounded-lg border border-gray-200 p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Session Details</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              {session.metadata.templateName && (
+              {typeof session.metadata.templateName === 'string' && (
                 <div>
                   <span className="text-gray-500">Template</span>
-                  <p className="font-medium text-gray-900">{session.metadata.templateName as string}</p>
+                  <p className="font-medium text-gray-900">{session.metadata.templateName}</p>
                 </div>
               )}
               {session.startedAt && (

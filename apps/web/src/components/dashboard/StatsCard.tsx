@@ -5,10 +5,11 @@ interface StatsCardProps {
     value: number;
     type: 'increase' | 'decrease';
   };
+  subtitle?: string;
   icon?: React.ReactNode;
 }
 
-export function StatsCard({ title, value, change, icon }: StatsCardProps) {
+export function StatsCard({ title, value, change, subtitle, icon }: StatsCardProps) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
       <div className="flex items-center justify-between">
@@ -33,6 +34,9 @@ export function StatsCard({ title, value, change, icon }: StatsCardProps) {
               </span>
               <span className="text-sm text-gray-500 ml-1">vs last week</span>
             </div>
+          )}
+          {subtitle && !change && (
+            <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
           )}
         </div>
         {icon && (
