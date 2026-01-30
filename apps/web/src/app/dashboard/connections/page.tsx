@@ -448,10 +448,11 @@ function ConnectionCard({
   onConnect,
   onDisconnect,
 }: ConnectionCardProps) {
-  const isConnected = connection?.status === 'connected';
+  // Check for both 'connected' and 'healthy' status
+  const isConnected = connection?.status === 'connected' || connection?.status === 'healthy';
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow">
+    <div className={`bg-white rounded-lg border ${isConnected ? 'border-green-200' : 'border-gray-200'} p-6 hover:shadow-md transition-shadow`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <div className={`w-12 h-12 ${color} rounded-lg flex items-center justify-center text-2xl`}>
@@ -459,24 +460,36 @@ function ConnectionCard({
           </div>
           <div>
             <h3 className="font-medium text-gray-900">{name}</h3>
-            {isConnected && connection.displayName && (
-              <p className="text-sm text-gray-500">{connection.displayName}</p>
+            {isConnected && connection?.displayName && (
+              <p className="text-sm text-green-600 font-medium">{connection.displayName}.myshopify.com</p>
             )}
           </div>
         </div>
         {isConnected && (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+            <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
             Connected
           </span>
         )}
       </div>
       
-      <p className="mt-3 text-sm text-gray-600">{description}</p>
+      {!isConnected && (
+        <p className="mt-3 text-sm text-gray-600">{description}</p>
+      )}
 
-      {connection?.lastSyncAt && (
-        <p className="mt-2 text-xs text-gray-400">
-          Last synced: {new Date(connection.lastSyncAt).toLocaleDateString()}
-        </p>
+      {isConnected && (
+        <div className="mt-3 p-3 bg-green-50 rounded-lg">
+          <p className="text-sm text-green-800">
+            Your store is connected and syncing products.
+          </p>
+          {connection?.lastSyncAt && (
+            <p className="text-xs text-green-600 mt-1">
+              Last synced: {new Date(connection.lastSyncAt).toLocaleString()}
+            </p>
+          )}
+        </div>
       )}
 
       <div className="mt-4">
