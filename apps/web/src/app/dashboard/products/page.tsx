@@ -7,32 +7,47 @@ import { createClient } from '@/lib/supabase/client';
 interface Variant {
   id: string;
   title: string;
-  sku: string;
+  sku: string | null;
   price: number;
   inventoryQuantity: number;
   imageUrl: string | null;
 }
 
-interface Product {
+// List view product (from /catalog/products)
+interface ProductListItem {
+  id: string;
+  title: string;
+  vendor: string | null;
+  imageUrl: string | null;
+  isActive: boolean;
+  variantCount: number;
+  priceRange: {
+    min: number;
+    max: number;
+    currency: string;
+  };
+}
+
+// Detail view product (from /catalog/products/:id)
+interface ProductDetail {
   id: string;
   title: string;
   description: string | null;
   vendor: string | null;
   productType: string | null;
-  status: string;
   imageUrl: string | null;
+  images: string[];
+  isActive: boolean;
   variants: Variant[];
-  createdAt: string;
-  updatedAt: string;
 }
 
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<ProductListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<ProductDetail | null>(null);
   const supabaseRef = useRef(createClient());
 
   const getToken = useCallback(async () => {
@@ -202,7 +217,22 @@ export default function ProductsPage() {
               <ProductCard
                 key={product.id}
                 product={product}
-                onSelect={() => setSelectedProduct(product)}
+                onSelect={async () => {
+                  try {
+                    const token = await getToken();
+                    if (!token) return;
+                    const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+                    const res = await fetch(`${apiUrl}/catalog/products/${product.id}`, {
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      setSelectedProduct(data.product);
+                    }
+                  } catch (err) {
+                    console.error('Failed to load product details', err);
+                  }
+                }}
                 formatPrice={formatPrice}
               />
             ))}
@@ -223,17 +253,15 @@ export default function ProductsPage() {
 }
 
 interface ProductCardProps {
-  product: Product;
+  product: ProductListItem;
   onSelect: () => void;
   formatPrice: (cents: number) => string;
 }
 
 function ProductCard({ product, onSelect, formatPrice }: ProductCardProps) {
-  const mainVariant = product.variants[0];
-  const totalInventory = product.variants.reduce((sum, v) => sum + (v.inventoryQuantity || 0), 0);
-  const priceRange = product.variants.length > 1 
-    ? `${formatPrice(Math.min(...product.variants.map(v => v.price)))} - ${formatPrice(Math.max(...product.variants.map(v => v.price)))}`
-    : formatPrice(mainVariant?.price || 0);
+  const priceRange = product.priceRange.min === product.priceRange.max
+    ? formatPrice(product.priceRange.min)
+    : `${formatPrice(product.priceRange.min)} - ${formatPrice(product.priceRange.max)}`;
 
   return (
     <div 
@@ -253,11 +281,11 @@ function ProductCard({ product, onSelect, formatPrice }: ProductCardProps) {
           </div>
         )}
         <span className={`absolute top-2 right-2 px-2 py-1 rounded text-xs font-medium ${
-          product.status === 'active' 
+          product.isActive 
             ? 'bg-green-100 text-green-700' 
             : 'bg-gray-100 text-gray-600'
         }`}>
-          {product.status}
+          {product.isActive ? 'Active' : 'Inactive'}
         </span>
       </div>
       <div className="p-4">
@@ -265,11 +293,11 @@ function ProductCard({ product, onSelect, formatPrice }: ProductCardProps) {
         <p className="text-sm text-gray-500 mt-1">{priceRange}</p>
         <div className="flex items-center justify-between mt-2">
           <span className="text-xs text-gray-400">
-            {product.variants.length} variant{product.variants.length !== 1 ? 's' : ''}
+            {product.variantCount} variant{product.variantCount !== 1 ? 's' : ''}
           </span>
-          <span className={`text-xs ${totalInventory > 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {totalInventory} in stock
-          </span>
+          {product.vendor && (
+            <span className="text-xs text-gray-400">{product.vendor}</span>
+          )}
         </div>
       </div>
     </div>
@@ -277,7 +305,7 @@ function ProductCard({ product, onSelect, formatPrice }: ProductCardProps) {
 }
 
 interface ProductModalProps {
-  product: Product;
+  product: ProductDetail;
   onClose: () => void;
   formatPrice: (cents: number) => string;
 }
@@ -324,8 +352,8 @@ function ProductModal({ product, onClose, formatPrice }: ProductModalProps) {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Status</span>
-                  <span className={product.status === 'active' ? 'text-green-600' : 'text-gray-600'}>
-                    {product.status}
+                  <span className={product.isActive ? 'text-green-600' : 'text-gray-600'}>
+                    {product.isActive ? 'Active' : 'Inactive'}
                   </span>
                 </div>
                 {product.productType && (
