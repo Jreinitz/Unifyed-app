@@ -145,17 +145,17 @@ export async function connectionsRoutes(fastify: FastifyInstance) {
 
     if (error) {
       // Redirect to frontend with error
-      return reply.redirect(`${env.APP_URL}/connections?error=${encodeURIComponent(error_description || error)}`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?error=${encodeURIComponent(error_description || error)}`);
     }
 
     if (!state || !code) {
-      return reply.redirect(`${env.APP_URL}/connections?error=invalid_callback`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?error=invalid_callback`);
     }
 
     // Verify state
     const stateData = await fastify.redis.get(`oauth:state:${state}`);
     if (!stateData) {
-      return reply.redirect(`${env.APP_URL}/connections?error=state_expired`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?error=state_expired`);
     }
 
     const { creatorId, shop: storedShop } = JSON.parse(stateData) as { 
@@ -175,7 +175,7 @@ export async function connectionsRoutes(fastify: FastifyInstance) {
       switch (platform) {
         case 'shopify': {
           if (!storedShop) {
-            return reply.redirect(`${env.APP_URL}/connections?error=missing_shop`);
+            return reply.redirect(`${env.APP_URL}/dashboard/connections?error=missing_shop`);
           }
           const shopDomain = storedShop.replace('.myshopify.com', '');
           
@@ -298,7 +298,7 @@ export async function connectionsRoutes(fastify: FastifyInstance) {
         }
         
         default:
-          return reply.redirect(`${env.APP_URL}/connections?error=unsupported_platform`);
+          return reply.redirect(`${env.APP_URL}/dashboard/connections?error=unsupported_platform`);
       }
 
       // Encrypt credentials
@@ -338,7 +338,7 @@ export async function connectionsRoutes(fastify: FastifyInstance) {
         .returning();
 
       if (!connection) {
-        return reply.redirect(`${env.APP_URL}/connections?error=save_failed`);
+        return reply.redirect(`${env.APP_URL}/dashboard/connections?error=save_failed`);
       }
 
       // Emit event
@@ -358,11 +358,11 @@ export async function connectionsRoutes(fastify: FastifyInstance) {
         );
       }
 
-      return reply.redirect(`${env.APP_URL}/connections?success=true&platform=${platform}`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?success=true&platform=${platform}`);
     } catch (err) {
       request.log.error(err, 'OAuth callback error');
       const errorMessage = err instanceof Error ? err.message : 'callback_failed';
-      return reply.redirect(`${env.APP_URL}/connections?error=${encodeURIComponent(errorMessage)}`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?error=${encodeURIComponent(errorMessage)}`);
     }
   });
 
@@ -592,16 +592,16 @@ export async function connectionsRoutes(fastify: FastifyInstance) {
     const { code, state, error, error_description } = request.query as Record<string, string>;
 
     if (error) {
-      return reply.redirect(`${env.APP_URL}/connections?error=${encodeURIComponent(error_description || error)}`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?error=${encodeURIComponent(error_description || error)}`);
     }
 
     if (!state || !code) {
-      return reply.redirect(`${env.APP_URL}/connections?error=invalid_callback`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?error=invalid_callback`);
     }
 
     const stateData = await fastify.redis.get(`oauth:state:${state}`);
     if (!stateData) {
-      return reply.redirect(`${env.APP_URL}/connections?error=state_expired`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?error=state_expired`);
     }
 
     const { creatorId } = JSON.parse(stateData) as { 
@@ -646,7 +646,7 @@ export async function connectionsRoutes(fastify: FastifyInstance) {
         }
         
         default:
-          return reply.redirect(`${env.APP_URL}/connections?error=unsupported_tool`);
+          return reply.redirect(`${env.APP_URL}/dashboard/connections?error=unsupported_tool`);
       }
 
       const encryptedCredentials = encrypt(
@@ -684,18 +684,18 @@ export async function connectionsRoutes(fastify: FastifyInstance) {
         .returning();
 
       if (!connection) {
-        return reply.redirect(`${env.APP_URL}/connections?error=save_failed`);
+        return reply.redirect(`${env.APP_URL}/dashboard/connections?error=save_failed`);
       }
 
       // TODO: Create dedicated STREAMING_TOOL_CONNECTED event type
       // For now, skip platform event emission for streaming tools
       fastify.log.info({ connectionId: connection.id, tool }, 'Streaming tool connected');
 
-      return reply.redirect(`${env.APP_URL}/connections?success=true&tool=${tool}`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?success=true&tool=${tool}`);
     } catch (err) {
       request.log.error(err, 'Streaming tool OAuth callback error');
       const errorMessage = err instanceof Error ? err.message : 'callback_failed';
-      return reply.redirect(`${env.APP_URL}/connections?error=${encodeURIComponent(errorMessage)}`);
+      return reply.redirect(`${env.APP_URL}/dashboard/connections?error=${encodeURIComponent(errorMessage)}`);
     }
   });
 
