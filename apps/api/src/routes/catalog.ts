@@ -184,25 +184,33 @@ export async function catalogRoutes(fastify: FastifyInstance) {
     // Do synchronous sync (worker not required)
     try {
       // Decrypt credentials
-      const credentials = JSON.parse(
-        decrypt(connection.credentials, env.CREDENTIALS_ENCRYPTION_KEY)
-      ) as { accessToken: string; shopDomain: string };
+      request.log.info({ connectionId, credentialsLength: connection.credentials?.length }, 'Attempting to decrypt credentials');
+      
+      let decryptedStr: string;
+      try {
+        decryptedStr = decrypt(connection.credentials, env.CREDENTIALS_ENCRYPTION_KEY);
+      } catch (decryptErr) {
+        request.log.error({ err: decryptErr, credentialsPreview: connection.credentials?.substring(0, 50) }, 'Failed to decrypt credentials');
+        throw new AppError(ErrorCodes.INTERNAL_ERROR, 'Failed to decrypt store credentials');
+      }
+      
+      const credentials = JSON.parse(decryptedStr) as { accessToken: string; shopDomain: string };
       
       const { accessToken, shopDomain } = credentials;
+      request.log.info({ shopDomain }, 'Fetching products from Shopify');
       
       // Fetch products from Shopify
-      const shopifyRes = await fetch(
-        `https://${shopDomain}.myshopify.com/admin/api/2024-01/products.json?limit=250`,
-        {
-          headers: {
-            'X-Shopify-Access-Token': accessToken,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const shopifyUrl = `https://${shopDomain}.myshopify.com/admin/api/2024-01/products.json?limit=250`;
+      const shopifyRes = await fetch(shopifyUrl, {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
+      });
       
       if (!shopifyRes.ok) {
         const error = await shopifyRes.text();
+        request.log.error({ status: shopifyRes.status, error, shopDomain }, 'Shopify API error');
         throw new AppError(ErrorCodes.INTEGRATION_ERROR, `Shopify API error: ${shopifyRes.status} - ${error}`);
       }
       
