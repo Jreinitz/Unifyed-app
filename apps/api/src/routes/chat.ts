@@ -266,7 +266,7 @@ export async function chatWebSocketRoutes(fastify: FastifyInstance) {
         const orderStats = await fastify.db
           .select({
             orderCount: count(orders.id),
-            totalRevenue: sum(orders.totalAmount),
+            totalRevenue: sum(orders.total),
           })
           .from(orders)
           .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))

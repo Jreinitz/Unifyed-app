@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, count, sum, desc, sql, gte } from 'drizzle-orm';
+import { eq, and, count, sum, desc } from 'drizzle-orm';
 import { AnalyticsService } from '../services/analytics.service.js';
 import { authPlugin } from '../plugins/auth.js';
 import { liveSessions, orders, checkoutSessions, attributionContexts, streams } from '@unifyed/db/schema';
@@ -182,7 +182,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
         const orderStats = await fastify.db
           .select({
             orderCount: count(orders.id),
-            totalRevenue: sum(orders.totalAmount),
+            totalRevenue: sum(orders.total),
           })
           .from(orders)
           .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))
@@ -259,7 +259,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     const orderStats = await fastify.db
       .select({
         orderCount: count(orders.id),
-        totalRevenue: sum(orders.totalAmount),
+        totalRevenue: sum(orders.total),
       })
       .from(orders)
       .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))
@@ -283,7 +283,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     const sessionOrders = await fastify.db
       .select({
         id: orders.id,
-        totalAmount: orders.totalAmount,
+        totalAmount: orders.total,
         status: orders.status,
         customerEmail: orders.customerEmail,
         createdAt: orders.createdAt,
@@ -306,7 +306,7 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
     const revenueByPlatform = await fastify.db
       .select({
         platform: attributionContexts.platform,
-        revenue: sum(orders.totalAmount),
+        revenue: sum(orders.total),
         orderCount: count(orders.id),
       })
       .from(orders)

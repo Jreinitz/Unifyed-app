@@ -161,6 +161,13 @@ export async function sessionTemplatesRoutes(fastify: FastifyInstance) {
         ));
     }
 
+    // Handle settings with exactOptionalPropertyTypes
+    const settingsValue = body.settings ? {
+      autoStartChat: body.settings.autoStartChat,
+      autoAnnounce: body.settings.autoAnnounce,
+      ...(body.settings.defaultTitle !== undefined ? { defaultTitle: body.settings.defaultTitle } : {}),
+    } : null;
+
     const [template] = await fastify.db
       .insert(sessionTemplates)
       .values({
@@ -170,10 +177,14 @@ export async function sessionTemplatesRoutes(fastify: FastifyInstance) {
         platforms: body.platforms,
         defaultOfferIds: body.defaultOfferIds,
         defaultProductIds: body.defaultProductIds,
-        settings: body.settings,
+        settings: settingsValue,
         isDefault: body.isDefault ?? false,
       })
       .returning();
+
+    if (!template) {
+      throw new AppError(ErrorCodes.INTERNAL_ERROR, 'Failed to create template');
+    }
 
     const response: SessionTemplateResponse = {
       id: template.id,
@@ -237,6 +248,10 @@ export async function sessionTemplatesRoutes(fastify: FastifyInstance) {
       .set(updateData)
       .where(eq(sessionTemplates.id, id))
       .returning();
+
+    if (!template) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Template not found');
+    }
 
     const response: SessionTemplateResponse = {
       id: template.id,
@@ -312,6 +327,10 @@ export async function sessionTemplatesRoutes(fastify: FastifyInstance) {
         },
       })
       .returning();
+
+    if (!session) {
+      throw new AppError(ErrorCodes.INTERNAL_ERROR, 'Failed to create session');
+    }
 
     return reply.status(201).send({
       session: {

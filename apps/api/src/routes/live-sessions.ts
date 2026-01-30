@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { eq, and, count, desc, inArray, sum, sql } from 'drizzle-orm';
+import { eq, and, count, desc, inArray, sum } from 'drizzle-orm';
 import { liveSessions, streams, platformConnections, sessionTemplates, offers, products, orders, checkoutSessions, attributionContexts } from '@unifyed/db/schema';
 import { z } from 'zod';
 import { AppError, ErrorCodes } from '@unifyed/utils';
@@ -404,6 +404,10 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
       })
       .returning();
 
+    if (!session) {
+      throw new AppError(ErrorCodes.INTERNAL_ERROR, 'Failed to create session');
+    }
+
     return reply.status(201).send({
       session: {
         id: session.id,
@@ -481,15 +485,16 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
       };
     }
 
-    // Check products
+    // Check products (products are linked via connectionId to platformConnections)
     let productsStatus: { ready: boolean; count: number } = { ready: true, count: 0 };
     if (metadata?.productIds && metadata.productIds.length > 0) {
       const productList = await fastify.db
         .select({ id: products.id })
         .from(products)
+        .innerJoin(platformConnections, eq(products.connectionId, platformConnections.id))
         .where(and(
           inArray(products.id, metadata.productIds),
-          eq(products.creatorId, request.creator.id)
+          eq(platformConnections.creatorId, request.creator.id)
         ));
 
       productsStatus = {
@@ -500,8 +505,9 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
 
     // Build checklist
     const targetPlatforms = metadata?.platforms || [];
+    const connectedPlatformStrings = connectedPlatforms.map(p => String(p));
     const platformsConnected = targetPlatforms.length === 0 || 
-      targetPlatforms.every(p => connectedPlatforms.includes(p));
+      targetPlatforms.every(p => connectedPlatformStrings.includes(p));
 
     const checklist = {
       platforms: {
@@ -511,8 +517,8 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
           : `Some platforms not connected`,
         details: {
           target: targetPlatforms,
-          connected: connectedPlatforms,
-          missing: targetPlatforms.filter(p => !connectedPlatforms.includes(p)),
+          connected: connectedPlatformStrings,
+          missing: targetPlatforms.filter(p => !connectedPlatformStrings.includes(p)),
         },
       },
       streaming: {
@@ -581,7 +587,7 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
     const orderStats = await fastify.db
       .select({
         orderCount: count(orders.id),
-        totalRevenue: sum(orders.totalAmount),
+        totalRevenue: sum(orders.total),
       })
       .from(orders)
       .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))
@@ -652,7 +658,7 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
     const orderStats = await fastify.db
       .select({
         orderCount: count(orders.id),
-        totalRevenue: sum(orders.totalAmount),
+        totalRevenue: sum(orders.total),
       })
       .from(orders)
       .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))
