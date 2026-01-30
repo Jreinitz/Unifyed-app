@@ -219,8 +219,8 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
           // Account exists but needs more info - create new onboarding link
           const onboardingUrl = await stripeIntegration.createAccountLink(
             existingAccountId,
-            `${env.APP_URL}/settings/payments?refresh=true`,
-            `${env.APP_URL}/settings/payments?connected=true`
+            `${env.APP_URL}/dashboard/settings?refresh=true`,
+            `${env.APP_URL}/dashboard/settings?connected=true`
           );
 
           return reply.send({
@@ -240,8 +240,8 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
           creator_id: profile.id,
           creator_handle: profile.handle ?? '',
         },
-        refreshUrl: `${env.APP_URL}/settings/payments?refresh=true`,
-        returnUrl: `${env.APP_URL}/settings/payments?connected=true`,
+        refreshUrl: `${env.APP_URL}/dashboard/settings?refresh=true`,
+        returnUrl: `${env.APP_URL}/dashboard/settings?connected=true`,
       });
 
       // Save Connect account ID to profile metadata
