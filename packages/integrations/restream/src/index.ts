@@ -196,14 +196,25 @@ export async function getChannels(accessToken: string): Promise<RestreamDestinat
     throw new Error(`Restream channels failed: ${response.status} - ${error}`);
   }
 
-  const data = (await response.json()) as Array<{
-    id: number;
-    platform: string;
-    platform_id: string;
-    display_name: string;
-    enabled: boolean;
-    connected: boolean;
-  }>;
+  const rawData = await response.json();
+  
+  // Handle both array response and object with channels property
+  const data = Array.isArray(rawData) 
+    ? rawData 
+    : (rawData?.channels ?? rawData?.data ?? []) as Array<{
+        id: number;
+        platform: string;
+        platform_id: string;
+        display_name: string;
+        enabled: boolean;
+        connected: boolean;
+      }>;
+
+  // Ensure we have an array
+  if (!Array.isArray(data)) {
+    console.warn('Restream channels response is not an array:', rawData);
+    return [];
+  }
 
   return data.map((ch) => ({
     id: ch.id,
