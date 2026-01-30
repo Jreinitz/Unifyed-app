@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/dashboard';
+import { createClient } from '@/lib/supabase/client';
 
 interface Variant {
   id: string;
@@ -32,10 +33,16 @@ export default function ProductsPage() {
   const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const supabase = createClient();
+
+  const getToken = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  }, [supabase.auth]);
 
   const fetchProducts = useCallback(async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       if (!token) {
         setError('Not authenticated');
         setLoading(false);
@@ -58,7 +65,7 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getToken]);
 
   useEffect(() => {
     fetchProducts();
@@ -68,7 +75,10 @@ export default function ProductsPage() {
     try {
       setSyncing(true);
       setError(null);
-      const token = localStorage.getItem('token');
+      const token = await getToken();
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       // First, get the Shopify connection
