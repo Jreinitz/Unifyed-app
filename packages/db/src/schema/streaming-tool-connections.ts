@@ -1,6 +1,6 @@
 import { pgTable, text, timestamp, uuid, varchar, jsonb, pgEnum, index, unique } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { creators } from './creators.js';
+import { profiles } from './profiles.js';
 
 // Streaming tool types
 export const streamingToolEnum = pgEnum('streaming_tool', [
@@ -25,7 +25,7 @@ export const streamingToolConnections = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     creatorId: uuid('creator_id')
       .notNull()
-      .references(() => creators.id, { onDelete: 'cascade' }),
+      .references(() => profiles.id, { onDelete: 'cascade' }),
     tool: streamingToolEnum('tool').notNull(),
     
     // Encrypted credentials (OAuth tokens, API keys)
@@ -65,8 +65,8 @@ export const streamingToolConnections = pgTable(
 
 // Relations
 export const streamingToolConnectionsRelations = relations(streamingToolConnections, ({ one }) => ({
-  creator: one(creators, {
+  profile: one(profiles, {
     fields: [streamingToolConnections.creatorId],
-    references: [creators.id],
+    references: [profiles.id],
   }),
 }));

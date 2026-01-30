@@ -29,6 +29,13 @@
       "when": 1769798804999,
       "tag": "0003_romantic_cammi",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1769806800000,
+      "tag": "0004_fix_streaming_tool_fk",
+      "breakpoints": true
     }
   ]
 }
