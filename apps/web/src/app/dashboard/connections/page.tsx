@@ -346,6 +346,7 @@ export default function ConnectionsPage() {
                     color={info.color}
                     connection={connection}
                     isConnecting={isConnecting}
+                    connectionType="ecommerce"
                     onConnect={() => handleConnect(platform, 'platform')}
                     onDisconnect={() => connection && handleDisconnect(connection.id, 'platform')}
                   />
@@ -375,6 +376,7 @@ export default function ConnectionsPage() {
                     connection={connection}
                     isConnecting={isConnecting}
                     isComingSoon={isComingSoon}
+                    connectionType="streaming"
                     onConnect={() => handleConnect(platform, 'platform')}
                     onDisconnect={() => connection && handleDisconnect(connection.id, 'platform')}
                   />
@@ -405,6 +407,7 @@ export default function ConnectionsPage() {
                   connection={connection}
                   isConnecting={isConnecting}
                   isComingSoon={isComingSoon}
+                  connectionType="tool"
                   onConnect={() => handleConnect(tool, 'tool')}
                   onDisconnect={() => connection && handleDisconnect(connection.id, 'tool')}
                 />
@@ -434,6 +437,7 @@ interface ConnectionCardProps {
   connection?: PlatformConnection | StreamingToolConnection;
   isConnecting: boolean;
   isComingSoon?: boolean;
+  connectionType: 'ecommerce' | 'streaming' | 'tool';
   onConnect: () => void;
   onDisconnect: () => void;
 }
@@ -446,11 +450,35 @@ function ConnectionCard({
   connection,
   isConnecting,
   isComingSoon,
+  connectionType,
   onConnect,
   onDisconnect,
 }: ConnectionCardProps) {
   // Check for both 'connected' and 'healthy' status
   const isConnected = connection?.status === 'connected' || connection?.status === 'healthy';
+
+  // Get the display name based on connection type
+  const getDisplayName = () => {
+    if (!connection?.displayName) return null;
+    if (connectionType === 'ecommerce') {
+      return `${connection.displayName}.myshopify.com`;
+    }
+    return connection.displayName;
+  };
+
+  // Get the connected message based on connection type
+  const getConnectedMessage = () => {
+    switch (connectionType) {
+      case 'ecommerce':
+        return 'Your store is connected and syncing products.';
+      case 'streaming':
+        return 'Your account is connected and tracking streams.';
+      case 'tool':
+        return 'Connected and ready to track multi-platform streams.';
+      default:
+        return 'Connected successfully.';
+    }
+  };
 
   return (
     <div className={`bg-white rounded-lg border ${isConnected ? 'border-green-200' : 'border-gray-200'} p-6 hover:shadow-md transition-shadow`}>
@@ -461,8 +489,8 @@ function ConnectionCard({
           </div>
           <div>
             <h3 className="font-medium text-gray-900">{name}</h3>
-            {isConnected && connection?.displayName && (
-              <p className="text-sm text-green-600 font-medium">{connection.displayName}.myshopify.com</p>
+            {isConnected && getDisplayName() && (
+              <p className="text-sm text-green-600 font-medium">{getDisplayName()}</p>
             )}
           </div>
         </div>
@@ -483,7 +511,7 @@ function ConnectionCard({
       {isConnected && (
         <div className="mt-3 p-3 bg-green-50 rounded-lg">
           <p className="text-sm text-green-800">
-            Your store is connected and syncing products.
+            {getConnectedMessage()}
           </p>
           {connection?.lastSyncAt && (
             <p className="text-xs text-green-600 mt-1">
