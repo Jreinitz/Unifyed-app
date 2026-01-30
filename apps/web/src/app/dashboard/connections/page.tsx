@@ -141,8 +141,9 @@ export default function ConnectionsPage() {
     const params = new URLSearchParams(window.location.search);
     const success = params.get('success');
     const platform = params.get('platform');
+    const tool = params.get('tool');
     
-    if (success === 'true' && platform) {
+    if (success === 'true' && (platform || tool)) {
       // Refresh connections after OAuth
       fetchConnections();
       // Clean URL
