@@ -1,6 +1,7 @@
-import { pgTable, text, timestamp, uuid, varchar, integer, jsonb, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, varchar, integer, jsonb, pgEnum, index, boolean } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { creators } from './creators.js';
+import { profiles } from './profiles.js';
 import { streamingToolConnections } from './streaming-tool-connections.js';
 
 // Live session status
@@ -68,5 +69,54 @@ export const liveSessionsRelations = relations(liveSessions, ({ one }) => ({
   streamingToolConnection: one(streamingToolConnections, {
     fields: [liveSessions.streamingToolConnectionId],
     references: [streamingToolConnections.id],
+  }),
+}));
+
+// Session templates - reusable configurations for going live
+export interface SessionTemplateSettings {
+  autoStartChat: boolean;
+  autoAnnounce: boolean;
+  defaultTitle?: string;
+}
+
+export const sessionTemplates = pgTable(
+  'session_templates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    creatorId: uuid('creator_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    
+    // Template details
+    name: varchar('name', { length: 255 }).notNull(),
+    description: text('description'),
+    
+    // Platforms to stream to (e.g., ['tiktok', 'youtube', 'twitch'])
+    platforms: jsonb('platforms').$type<string[]>(),
+    
+    // Pre-selected offers and products
+    defaultOfferIds: jsonb('default_offer_ids').$type<string[]>(),
+    defaultProductIds: jsonb('default_product_ids').$type<string[]>(),
+    
+    // Template settings
+    settings: jsonb('settings').$type<SessionTemplateSettings>(),
+    
+    // Mark one template as the default
+    isDefault: boolean('is_default').default(false).notNull(),
+    
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    creatorIdx: index('session_templates_creator_idx').on(table.creatorId),
+    isDefaultIdx: index('session_templates_is_default_idx').on(table.isDefault),
+  })
+);
+
+// Session template relations
+export const sessionTemplatesRelations = relations(sessionTemplates, ({ one }) => ({
+  creator: one(profiles, {
+    fields: [sessionTemplates.creatorId],
+    references: [profiles.id],
   }),
 }));

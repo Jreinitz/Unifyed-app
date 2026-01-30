@@ -84,6 +84,8 @@ export default function ConnectionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
+  const [showShopifyModal, setShowShopifyModal] = useState(false);
+  const [shopifyDomain, setShopifyDomain] = useState('');
   const supabase = createClient();
 
   const getToken = useCallback(async () => {
@@ -148,7 +150,13 @@ export default function ConnectionsPage() {
     }
   }, [fetchConnections]);
 
-  const handleConnect = async (platform: string, type: 'platform' | 'tool') => {
+  const handleConnect = async (platform: string, type: 'platform' | 'tool', shopDomain?: string) => {
+    // For Shopify, show modal to get shop domain first
+    if (platform === 'shopify' && !shopDomain) {
+      setShowShopifyModal(true);
+      return;
+    }
+
     try {
       setConnectingPlatform(platform);
       const token = await getToken();
@@ -159,9 +167,14 @@ export default function ConnectionsPage() {
       
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
-      const endpoint = type === 'platform' 
+      let endpoint = type === 'platform' 
         ? `${apiUrl}/connections/${platform}/auth-url`
         : `${apiUrl}/connections/tools/${platform}/auth-url`;
+      
+      // Add shop domain for Shopify
+      if (platform === 'shopify' && shopDomain) {
+        endpoint += `?shop=${encodeURIComponent(shopDomain)}`;
+      }
       
       const res = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
@@ -178,6 +191,20 @@ export default function ConnectionsPage() {
       setError(err instanceof Error ? err.message : 'Failed to connect');
       setConnectingPlatform(null);
     }
+  };
+
+  const handleShopifyConnect = () => {
+    if (!shopifyDomain.trim()) {
+      setError('Please enter your Shopify store domain');
+      return;
+    }
+    // Clean up the domain - remove .myshopify.com if they included it
+    let cleanDomain = shopifyDomain.trim().toLowerCase();
+    cleanDomain = cleanDomain.replace(/\.myshopify\.com$/, '');
+    cleanDomain = cleanDomain.replace(/^https?:\/\//, '');
+    
+    setShowShopifyModal(false);
+    handleConnect('shopify', 'platform', cleanDomain);
   };
 
   const handleDisconnect = async (connectionId: string, type: 'platform' | 'tool') => {
@@ -246,6 +273,56 @@ export default function ConnectionsPage() {
             >
               Dismiss
             </button>
+          </div>
+        )}
+
+        {/* Shopify Store Domain Modal */}
+        {showShopifyModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Connect Shopify Store</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Enter your Shopify store domain to connect your store.
+              </p>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Store Domain
+                </label>
+                <div className="flex items-center">
+                  <input
+                    type="text"
+                    value={shopifyDomain}
+                    onChange={(e) => setShopifyDomain(e.target.value)}
+                    placeholder="your-store"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    onKeyDown={(e) => e.key === 'Enter' && handleShopifyConnect()}
+                  />
+                  <span className="px-3 py-2 bg-gray-100 border border-l-0 border-gray-300 rounded-r-lg text-gray-500 text-sm">
+                    .myshopify.com
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Example: if your store URL is my-store.myshopify.com, enter &quot;my-store&quot;
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowShopifyModal(false);
+                    setShopifyDomain('');
+                  }}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleShopifyConnect}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  Connect Store
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

@@ -1,4 +1,10 @@
 import { defineConfig } from 'drizzle-kit';
+import { config } from 'dotenv';
+import { resolve } from 'path';
+
+// Load env from workspace root
+config({ path: resolve(__dirname, '../../.env.local') });
+config({ path: resolve(__dirname, '../../.env') });
 
 export default defineConfig({
   schema: './dist/schema/*.js',

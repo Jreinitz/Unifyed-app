@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { eq, and, count, desc } from 'drizzle-orm';
-import { liveSessions, streams, platformConnections } from '@unifyed/db/schema';
+import { eq, and, count, desc, inArray, sum, sql } from 'drizzle-orm';
+import { liveSessions, streams, platformConnections, sessionTemplates, offers, products, orders, checkoutSessions, attributionContexts } from '@unifyed/db/schema';
 import { z } from 'zod';
 import { AppError, ErrorCodes } from '@unifyed/utils';
 import { authPlugin } from '../plugins/auth.js';
@@ -343,5 +343,375 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new AppError(ErrorCodes.INTEGRATION_ERROR, `Failed to get Restream settings: ${message}`);
     }
+  });
+
+  // POST /live-sessions/prepare - Prepare a new session
+  const prepareSessionBodySchema = z.object({
+    title: z.string().optional(),
+    templateId: z.string().uuid().optional(),
+    platforms: z.array(z.string()).optional(),
+    offerIds: z.array(z.string().uuid()).optional(),
+    productIds: z.array(z.string().uuid()).optional(),
+  });
+
+  fastify.post('/prepare', async (request, reply) => {
+    const body = prepareSessionBodySchema.parse(request.body);
+
+    let sessionTitle = body.title;
+    let metadata: Record<string, unknown> = {};
+
+    // If template is specified, load its settings
+    if (body.templateId) {
+      const [template] = await fastify.db
+        .select()
+        .from(sessionTemplates)
+        .where(and(
+          eq(sessionTemplates.id, body.templateId),
+          eq(sessionTemplates.creatorId, request.creator.id)
+        ))
+        .limit(1);
+
+      if (!template) {
+        throw new AppError(ErrorCodes.NOT_FOUND, 'Template not found');
+      }
+
+      const templateSettings = template.settings as { defaultTitle?: string } | null;
+      sessionTitle = body.title || templateSettings?.defaultTitle || template.name;
+      metadata = {
+        templateId: template.id,
+        templateName: template.name,
+        platforms: body.platforms || template.platforms,
+        offerIds: body.offerIds || template.defaultOfferIds,
+        productIds: body.productIds || template.defaultProductIds,
+        settings: template.settings,
+      };
+    } else {
+      metadata = {
+        platforms: body.platforms,
+        offerIds: body.offerIds,
+        productIds: body.productIds,
+      };
+    }
+
+    // Create session in preparing status
+    const [session] = await fastify.db
+      .insert(liveSessions)
+      .values({
+        creatorId: request.creator.id,
+        title: sessionTitle,
+        status: 'preparing',
+        metadata,
+      })
+      .returning();
+
+    return reply.status(201).send({
+      session: {
+        id: session.id,
+        creatorId: session.creatorId,
+        title: session.title,
+        status: session.status,
+        metadata: session.metadata,
+        createdAt: session.createdAt,
+      },
+    });
+  });
+
+  // GET /live-sessions/:id/checklist - Get preparation checklist for a session
+  fastify.get('/:id/checklist', async (request, reply) => {
+    const { id } = getLiveSessionParamsSchema.parse(request.params);
+
+    // Get the session
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    const metadata = session.metadata as {
+      platforms?: string[];
+      offerIds?: string[];
+      productIds?: string[];
+    } | null;
+
+    // Check platforms connection status
+    const platformConns = await fastify.db
+      .select({
+        platform: platformConnections.platform,
+        status: platformConnections.status,
+        displayName: platformConnections.displayName,
+      })
+      .from(platformConnections)
+      .where(eq(platformConnections.creatorId, request.creator.id));
+
+    const connectedPlatforms = platformConns
+      .filter(p => p.status === 'healthy')
+      .map(p => p.platform);
+
+    // Check Restream
+    const restreamConn = await fastify.db.query.streamingToolConnections.findFirst({
+      where: (t, { eq, and }) => and(
+        eq(t.creatorId, request.creator.id),
+        eq(t.tool, 'restream'),
+        eq(t.status, 'connected')
+      ),
+    });
+
+    // Check offers
+    let offersStatus: { ready: boolean; items: Array<{ id: string; name: string; status: string }> } = { ready: true, items: [] };
+    if (metadata?.offerIds && metadata.offerIds.length > 0) {
+      const offerList = await fastify.db
+        .select({ id: offers.id, name: offers.name, status: offers.status })
+        .from(offers)
+        .where(and(
+          inArray(offers.id, metadata.offerIds),
+          eq(offers.creatorId, request.creator.id)
+        ));
+
+      const activeOffers = offerList.filter(o => o.status === 'active');
+      offersStatus = {
+        ready: activeOffers.length === metadata.offerIds.length,
+        items: offerList.map(o => ({ id: o.id, name: o.name, status: o.status })),
+      };
+    }
+
+    // Check products
+    let productsStatus: { ready: boolean; count: number } = { ready: true, count: 0 };
+    if (metadata?.productIds && metadata.productIds.length > 0) {
+      const productList = await fastify.db
+        .select({ id: products.id })
+        .from(products)
+        .where(and(
+          inArray(products.id, metadata.productIds),
+          eq(products.creatorId, request.creator.id)
+        ));
+
+      productsStatus = {
+        ready: productList.length === metadata.productIds.length,
+        count: productList.length,
+      };
+    }
+
+    // Build checklist
+    const targetPlatforms = metadata?.platforms || [];
+    const platformsConnected = targetPlatforms.length === 0 || 
+      targetPlatforms.every(p => connectedPlatforms.includes(p));
+
+    const checklist = {
+      platforms: {
+        status: platformsConnected ? 'ready' : 'warning',
+        message: platformsConnected 
+          ? `${connectedPlatforms.length} platform(s) connected`
+          : `Some platforms not connected`,
+        details: {
+          target: targetPlatforms,
+          connected: connectedPlatforms,
+          missing: targetPlatforms.filter(p => !connectedPlatforms.includes(p)),
+        },
+      },
+      streaming: {
+        status: restreamConn ? 'ready' : connectedPlatforms.length > 0 ? 'ready' : 'error',
+        message: restreamConn 
+          ? 'Restream connected - ready to multistream'
+          : connectedPlatforms.length > 0
+            ? 'Direct platform connections available'
+            : 'No streaming setup available',
+        hasRestream: !!restreamConn,
+      },
+      offers: {
+        status: offersStatus.ready ? 'ready' : 'warning',
+        message: offersStatus.items.length === 0
+          ? 'No offers selected'
+          : offersStatus.ready
+            ? `${offersStatus.items.length} offer(s) ready`
+            : 'Some offers not active',
+        items: offersStatus.items,
+      },
+      products: {
+        status: productsStatus.ready ? 'ready' : 'warning',
+        message: productsStatus.count === 0
+          ? 'No products selected'
+          : `${productsStatus.count} product(s) selected`,
+        count: productsStatus.count,
+      },
+      overall: {
+        ready: platformsConnected && (!!restreamConn || connectedPlatforms.length > 0),
+        warnings: [
+          !platformsConnected ? 'Some platforms not connected' : null,
+          !offersStatus.ready && offersStatus.items.length > 0 ? 'Some offers not active' : null,
+        ].filter(Boolean),
+      },
+    };
+
+    return reply.send({
+      session: {
+        id: session.id,
+        title: session.title,
+        status: session.status,
+      },
+      checklist,
+    });
+  });
+
+  // GET /live-sessions/:id/stats - Get real-time session statistics
+  fastify.get('/:id/stats', async (request, reply) => {
+    const { id } = getLiveSessionParamsSchema.parse(request.params);
+
+    // Get the session
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    // Get orders attributed to this session
+    const orderStats = await fastify.db
+      .select({
+        orderCount: count(orders.id),
+        totalRevenue: sum(orders.totalAmount),
+      })
+      .from(orders)
+      .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))
+      .where(eq(attributionContexts.liveSessionId, id));
+
+    // Get checkout sessions for conversion rate
+    const checkoutStats = await fastify.db
+      .select({
+        checkoutCount: count(checkoutSessions.id),
+      })
+      .from(checkoutSessions)
+      .innerJoin(attributionContexts, eq(checkoutSessions.attributionContextId, attributionContexts.id))
+      .where(eq(attributionContexts.liveSessionId, id));
+
+    const orderCount = Number(orderStats[0]?.orderCount || 0);
+    const totalRevenue = Number(orderStats[0]?.totalRevenue || 0);
+    const checkoutCount = Number(checkoutStats[0]?.checkoutCount || 0);
+    const conversionRate = checkoutCount > 0 ? (orderCount / checkoutCount) * 100 : 0;
+
+    // Calculate duration
+    let duration = 0;
+    if (session.startedAt) {
+      const endTime = session.endedAt ? new Date(session.endedAt) : new Date();
+      duration = Math.floor((endTime.getTime() - new Date(session.startedAt).getTime()) / 1000);
+    }
+
+    // Get platform breakdown from session
+    const viewsByPlatform = session.viewsByPlatform as Record<string, number> | null;
+
+    return reply.send({
+      sessionId: session.id,
+      title: session.title,
+      status: session.status,
+      startedAt: session.startedAt,
+      duration, // in seconds
+      stats: {
+        revenue: totalRevenue,
+        orders: orderCount,
+        checkouts: checkoutCount,
+        conversionRate: Math.round(conversionRate * 10) / 10,
+        totalViewers: session.totalViews || 0,
+        peakViewers: session.totalPeakViewers || 0,
+        viewsByPlatform: viewsByPlatform || {},
+      },
+    });
+  });
+
+  // GET /live-sessions/current/stats - Get stats for currently live session
+  fastify.get('/current/stats', async (request, reply) => {
+    // Find currently live session
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.creatorId, request.creator.id),
+        eq(liveSessions.status, 'live')
+      ))
+      .limit(1);
+
+    if (!session) {
+      return reply.send({
+        isLive: false,
+        stats: null,
+      });
+    }
+
+    // Get orders attributed to this session
+    const orderStats = await fastify.db
+      .select({
+        orderCount: count(orders.id),
+        totalRevenue: sum(orders.totalAmount),
+      })
+      .from(orders)
+      .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))
+      .where(eq(attributionContexts.liveSessionId, session.id));
+
+    // Get checkout sessions for conversion rate
+    const checkoutStats = await fastify.db
+      .select({
+        checkoutCount: count(checkoutSessions.id),
+      })
+      .from(checkoutSessions)
+      .innerJoin(attributionContexts, eq(checkoutSessions.attributionContextId, attributionContexts.id))
+      .where(eq(attributionContexts.liveSessionId, session.id));
+
+    const orderCount = Number(orderStats[0]?.orderCount || 0);
+    const totalRevenue = Number(orderStats[0]?.totalRevenue || 0);
+    const checkoutCount = Number(checkoutStats[0]?.checkoutCount || 0);
+    const conversionRate = checkoutCount > 0 ? (orderCount / checkoutCount) * 100 : 0;
+
+    // Calculate duration
+    let duration = 0;
+    if (session.startedAt) {
+      duration = Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 1000);
+    }
+
+    const viewsByPlatform = session.viewsByPlatform as Record<string, number> | null;
+
+    return reply.send({
+      isLive: true,
+      sessionId: session.id,
+      title: session.title,
+      startedAt: session.startedAt,
+      duration,
+      stats: {
+        revenue: totalRevenue,
+        orders: orderCount,
+        checkouts: checkoutCount,
+        conversionRate: Math.round(conversionRate * 10) / 10,
+        totalViewers: session.totalViews || 0,
+        peakViewers: session.totalPeakViewers || 0,
+        viewsByPlatform: viewsByPlatform || {},
+      },
+    });
+  });
+
+  // GET /live-sessions/templates - Get available templates (convenience endpoint)
+  fastify.get('/templates', async (request, reply) => {
+    const templates = await fastify.db
+      .select({
+        id: sessionTemplates.id,
+        name: sessionTemplates.name,
+        description: sessionTemplates.description,
+        platforms: sessionTemplates.platforms,
+        isDefault: sessionTemplates.isDefault,
+      })
+      .from(sessionTemplates)
+      .where(eq(sessionTemplates.creatorId, request.creator.id))
+      .orderBy(desc(sessionTemplates.isDefault), desc(sessionTemplates.createdAt));
+
+    return reply.send({ templates });
   });
 }

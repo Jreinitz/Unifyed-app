@@ -4,9 +4,13 @@ import type { ChatState, ChatPlatform } from '@unifyed/types';
 
 interface LiveStatsProps {
   chatState: ChatState | null;
-  revenue?: number; // Today's revenue in cents
-  orders?: number; // Today's orders
+  revenue?: number; // Session revenue in cents
+  orders?: number; // Session orders
   conversionRate?: number; // Percentage
+  peakViewers?: number; // Peak viewer count
+  duration?: number; // Duration in seconds
+  isLive?: boolean; // Override live status from session stats
+  sessionTitle?: string; // Session title
 }
 
 const platformColors: Record<ChatPlatform, string> = {
@@ -19,9 +23,30 @@ const platformColors: Record<ChatPlatform, string> = {
   restream: 'bg-cyan-500',
 };
 
-export function LiveStats({ chatState, revenue = 0, orders = 0, conversionRate = 0 }: LiveStatsProps) {
+// Format duration as HH:MM:SS
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+export function LiveStats({ 
+  chatState, 
+  revenue = 0, 
+  orders = 0, 
+  conversionRate = 0,
+  peakViewers = 0,
+  duration = 0,
+  isLive: isLiveOverride,
+  sessionTitle,
+}: LiveStatsProps) {
   const totalViewers = chatState?.totalViewers || 0;
-  const isLive = chatState?.isLive || false;
+  const isLive = isLiveOverride ?? chatState?.isLive ?? false;
 
   // Calculate viewer breakdown
   const viewerBreakdown = chatState?.connections
@@ -34,13 +59,16 @@ export function LiveStats({ chatState, revenue = 0, orders = 0, conversionRate =
 
   return (
     <div className="bg-gray-900 rounded-lg p-4 space-y-4">
-      {/* Live status */}
+      {/* Live status with session info */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {isLive ? (
             <>
               <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
               <span className="text-red-500 font-bold text-sm uppercase tracking-wide">Live</span>
+              {duration > 0 && (
+                <span className="text-gray-400 text-sm font-mono">{formatDuration(duration)}</span>
+              )}
             </>
           ) : (
             <>
@@ -52,10 +80,20 @@ export function LiveStats({ chatState, revenue = 0, orders = 0, conversionRate =
         <span className="text-gray-400 text-sm">{chatState?.messageCount || 0} messages</span>
       </div>
 
+      {/* Session title */}
+      {sessionTitle && isLive && (
+        <div className="text-center">
+          <p className="text-sm text-gray-300 truncate">{sessionTitle}</p>
+        </div>
+      )}
+
       {/* Total viewers */}
       <div className="text-center py-4 bg-gray-800/50 rounded-lg">
         <div className="text-4xl font-bold text-white">{totalViewers.toLocaleString()}</div>
-        <div className="text-gray-400 text-sm mt-1">Total Viewers</div>
+        <div className="text-gray-400 text-sm mt-1">
+          Total Viewers
+          {peakViewers > 0 && <span className="ml-2 text-gray-500">(Peak: {peakViewers.toLocaleString()})</span>}
+        </div>
       </div>
 
       {/* Platform breakdown */}

@@ -22,22 +22,26 @@ if (!existsSync(resolve(workspaceRoot, 'turbo.json')) && !existsSync(resolve(wor
 
 console.log(`Loading env from: ${workspaceRoot}`);
 
-// Load environment variables from workspace root
+// Load environment variables from workspace root BEFORE importing modules that validate env
 dotenv.config({ path: resolve(workspaceRoot, '.env.local') });
 dotenv.config({ path: resolve(workspaceRoot, '.env') });
 
-import { buildApp } from './app.js';
-import { env } from './config/env.js';
-
 async function start() {
+  // Dynamic imports after env is loaded
+  const { buildApp } = await import('./app.js');
+  const { env } = await import('./config/env.js');
+  
   const app = await buildApp();
 
   // Railway provides PORT, use it if available, otherwise use API_PORT
   const port = env.PORT || env.API_PORT;
+  // Use 127.0.0.1 for local dev to avoid network interface enumeration issues
+  const host = env.NODE_ENV === 'development' ? '127.0.0.1' : env.API_HOST;
   
   try {
-    await app.listen({ port, host: env.API_HOST });
-    console.log(`🚀 Unifyed API running on http://${env.API_HOST}:${port}`);
+    // listenTextResolver: null suppresses address logging that causes uv_interface_addresses error
+    await app.listen({ port, host, listenTextResolver: () => `http://${host}:${port}` });
+    console.log(`🚀 Unifyed API running on http://${host}:${port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

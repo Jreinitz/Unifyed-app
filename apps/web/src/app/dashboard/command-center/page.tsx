@@ -5,6 +5,22 @@ import { createClient } from '@/lib/supabase/client';
 import { ChatPanel, LiveStats, QuickActions } from '@/components/command-center';
 import type { ChatMessage, ChatState, ChatPlatform } from '@unifyed/types';
 
+interface SessionStatsData {
+  isLive: boolean;
+  sessionId?: string;
+  title?: string | null;
+  duration?: number;
+  stats?: {
+    revenue: number;
+    orders: number;
+    checkouts: number;
+    conversionRate: number;
+    totalViewers: number;
+    peakViewers: number;
+    viewsByPlatform: Record<string, number>;
+  };
+}
+
 export default function CommandCenterPage() {
   const supabase = createClient();
   const [chatState, setChatState] = useState<ChatState | null>(null);
@@ -12,9 +28,14 @@ export default function CommandCenterPage() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offers, setOffers] = useState<Array<{ id: string; name: string; discount: string; active: boolean }>>([]);
-  const [sessionStats, setSessionStats] = useState({ revenue: 0, orders: 0, conversionRate: 0 });
+  const [sessionStats, setSessionStats] = useState<SessionStatsData>({ 
+    isLive: false,
+    stats: { revenue: 0, orders: 0, checkouts: 0, conversionRate: 0, totalViewers: 0, peakViewers: 0, viewsByPlatform: {} }
+  });
+  const [sessionDuration, setSessionDuration] = useState(0);
   
   const wsRef = useRef<WebSocket | null>(null);
+  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch active offers
   useEffect(() => {
@@ -97,6 +118,25 @@ export default function CommandCenterPage() {
               setChatState(data.data);
               break;
 
+            case 'session_stats':
+              setSessionStats(data.data);
+              // Start duration timer if live
+              if (data.data.isLive && data.data.duration !== undefined) {
+                setSessionDuration(data.data.duration);
+                // Clear any existing interval
+                if (durationIntervalRef.current) {
+                  clearInterval(durationIntervalRef.current);
+                }
+                // Update duration every second
+                durationIntervalRef.current = setInterval(() => {
+                  setSessionDuration((prev) => prev + 1);
+                }, 1000);
+              } else if (!data.data.isLive && durationIntervalRef.current) {
+                clearInterval(durationIntervalRef.current);
+                durationIntervalRef.current = null;
+              }
+              break;
+
             case 'error':
               console.error('Chat error:', data.message);
               setError(data.message);
@@ -148,36 +188,111 @@ export default function CommandCenterPage() {
     }
   }, []);
 
-  // Handle pin offer
-  const handlePinOffer = useCallback((offerId: string) => {
-    const offer = offers.find((o) => o.id === offerId);
-    if (offer) {
-      sendMessage(`📌 Check out: ${offer.name} - ${offer.discount} off! Click the link below to get this deal!`);
-    }
-  }, [offers, sendMessage]);
+  // Handle pin offer - calls API to create trackable link and send to chat
+  const handlePinOffer = useCallback(async (offerId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setError('Please sign in to pin offers');
+        return;
+      }
 
-  // Handle drop link
-  const handleDropLink = useCallback((offerId: string) => {
-    const offer = offers.find((o) => o.id === offerId);
-    if (offer) {
-      // In production, this would generate a trackable short link
-      sendMessage(`🔗 Get ${offer.discount} off now: unifyed.link/${offerId.slice(0, 8)}`);
-    }
-  }, [offers, sendMessage]);
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/chat-commerce/pin-offer`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ offerId }),
+      });
 
-  // Handle flash sale
-  const handleFlashSale = useCallback((offerId: string, duration: number) => {
-    const offer = offers.find((o) => o.id === offerId);
-    if (offer) {
-      sendMessage(`⚡ FLASH SALE! ${offer.name} - ${offer.discount} off for the next ${duration} minutes ONLY! 🔥`);
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error?.message || 'Failed to pin offer');
+      }
+
+      // Success - the API handles sending the message to chat
+      console.log('Offer pinned successfully');
+    } catch (err) {
+      console.error('Failed to pin offer:', err);
+      setError(err instanceof Error ? err.message : 'Failed to pin offer');
     }
-  }, [offers, sendMessage]);
+  }, [supabase]);
+
+  // Handle drop link - calls API to create trackable link and send to chat
+  const handleDropLink = useCallback(async (offerId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setError('Please sign in to drop links');
+        return;
+      }
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/chat-commerce/drop-link`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ offerId }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error?.message || 'Failed to drop link');
+      }
+
+      // Success - the API handles sending the message to chat
+      console.log('Link dropped successfully');
+    } catch (err) {
+      console.error('Failed to drop link:', err);
+      setError(err instanceof Error ? err.message : 'Failed to drop link');
+    }
+  }, [supabase]);
+
+  // Handle flash sale - calls API to create flash sale record and send to chat
+  const handleFlashSale = useCallback(async (offerId: string, duration: number) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setError('Please sign in to start flash sales');
+        return;
+      }
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/chat-commerce/flash-sale`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          offerId, 
+          durationMinutes: duration,
+          additionalDiscount: 10, // Default additional 10% off for flash sales
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error?.message || 'Failed to start flash sale');
+      }
+
+      // Success - the API handles sending the announcement and scheduling end
+      console.log('Flash sale started successfully');
+    } catch (err) {
+      console.error('Failed to start flash sale:', err);
+      setError(err instanceof Error ? err.message : 'Failed to start flash sale');
+    }
+  }, [supabase]);
 
   // Clean up on unmount
   useEffect(() => {
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
+      }
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
       }
     };
   }, []);
@@ -228,9 +343,13 @@ export default function CommandCenterPage() {
         <div className="col-span-3 space-y-4">
           <LiveStats
             chatState={chatState}
-            revenue={sessionStats.revenue}
-            orders={sessionStats.orders}
-            conversionRate={sessionStats.conversionRate}
+            revenue={sessionStats.stats?.revenue || 0}
+            orders={sessionStats.stats?.orders || 0}
+            conversionRate={sessionStats.stats?.conversionRate || 0}
+            peakViewers={sessionStats.stats?.peakViewers || 0}
+            duration={sessionDuration}
+            isLive={sessionStats.isLive}
+            sessionTitle={sessionStats.title || undefined}
           />
           <QuickActions
             offers={offers}

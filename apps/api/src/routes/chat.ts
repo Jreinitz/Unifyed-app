@@ -1,8 +1,10 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { eq, and, count, sum } from 'drizzle-orm';
 import { AppError, ErrorCodes } from '@unifyed/utils';
 import { authPlugin } from '../plugins/auth.js';
 import { getChatService, createChatService } from '../services/chat.service.js';
+import { liveSessions, orders, checkoutSessions, attributionContexts } from '@unifyed/db/schema';
 import type { ChatMessage, ChatState, ChatPlatform } from '@unifyed/types';
 
 // Request schemas
@@ -236,6 +238,89 @@ export async function chatWebSocketRoutes(fastify: FastifyInstance) {
       }));
     }
 
+    // Session stats polling
+    let statsIntervalId: NodeJS.Timeout | null = null;
+
+    const fetchAndSendSessionStats = async () => {
+      try {
+        // Find current live session
+        const [session] = await fastify.db
+          .select()
+          .from(liveSessions)
+          .where(and(
+            eq(liveSessions.creatorId, creatorId),
+            eq(liveSessions.status, 'live')
+          ))
+          .limit(1);
+
+        if (!session) {
+          // No live session, send empty stats
+          socket.send(JSON.stringify({
+            type: 'session_stats',
+            data: { isLive: false, stats: null },
+          }));
+          return;
+        }
+
+        // Get orders attributed to this session
+        const orderStats = await fastify.db
+          .select({
+            orderCount: count(orders.id),
+            totalRevenue: sum(orders.totalAmount),
+          })
+          .from(orders)
+          .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))
+          .where(eq(attributionContexts.liveSessionId, session.id));
+
+        // Get checkout sessions for conversion rate
+        const checkoutStats = await fastify.db
+          .select({
+            checkoutCount: count(checkoutSessions.id),
+          })
+          .from(checkoutSessions)
+          .innerJoin(attributionContexts, eq(checkoutSessions.attributionContextId, attributionContexts.id))
+          .where(eq(attributionContexts.liveSessionId, session.id));
+
+        const orderCount = Number(orderStats[0]?.orderCount || 0);
+        const totalRevenue = Number(orderStats[0]?.totalRevenue || 0);
+        const checkoutCount = Number(checkoutStats[0]?.checkoutCount || 0);
+        const conversionRate = checkoutCount > 0 ? (orderCount / checkoutCount) * 100 : 0;
+
+        // Calculate duration
+        let duration = 0;
+        if (session.startedAt) {
+          duration = Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 1000);
+        }
+
+        const viewsByPlatform = session.viewsByPlatform as Record<string, number> | null;
+
+        socket.send(JSON.stringify({
+          type: 'session_stats',
+          data: {
+            isLive: true,
+            sessionId: session.id,
+            title: session.title,
+            duration,
+            stats: {
+              revenue: totalRevenue,
+              orders: orderCount,
+              checkouts: checkoutCount,
+              conversionRate: Math.round(conversionRate * 10) / 10,
+              totalViewers: session.totalViews || 0,
+              peakViewers: session.totalPeakViewers || 0,
+              viewsByPlatform: viewsByPlatform || {},
+            },
+          },
+        }));
+      } catch (error) {
+        console.error('Failed to fetch session stats:', error);
+      }
+    };
+
+    // Start session stats polling (every 30 seconds)
+    fetchAndSendSessionStats(); // Send initial stats
+    statsIntervalId = setInterval(fetchAndSendSessionStats, 30000);
+
     // Handle incoming messages
     socket.on('message', async (data: Buffer) => {
       try {
@@ -272,6 +357,9 @@ export async function chatWebSocketRoutes(fastify: FastifyInstance) {
       console.log(`💬 WebSocket disconnected for creator ${creatorId}`);
       unsubMessage();
       unsubState();
+      if (statsIntervalId) {
+        clearInterval(statsIntervalId);
+      }
     });
   });
 }

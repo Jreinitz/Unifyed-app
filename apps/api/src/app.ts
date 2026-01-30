@@ -32,6 +32,7 @@ import { analyticsRoutes } from './routes/analytics.js';
 import { chatRoutes, chatWebSocketRoutes } from './routes/chat.js';
 import { chatCommerceRoutes } from './routes/chat-commerce.js';
 import { chatAIRoutes } from './routes/chat-ai.js';
+import { sessionTemplatesRoutes } from './routes/session-templates.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -116,6 +117,7 @@ export async function buildApp() {
   await app.register(chatWebSocketRoutes, { prefix: '/chat' });
   await app.register(chatCommerceRoutes, { prefix: '/chat-commerce' });
   await app.register(chatAIRoutes, { prefix: '/chat-ai' });
+  await app.register(sessionTemplatesRoutes, { prefix: '/session-templates' });
 
   return app;
 }
