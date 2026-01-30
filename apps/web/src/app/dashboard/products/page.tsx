@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Header } from '@/components/dashboard';
 import { createClient } from '@/lib/supabase/client';
 
@@ -33,12 +33,12 @@ export default function ProductsPage() {
   const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const supabase = useMemo(() => createClient(), []);
+  const supabaseRef = useRef(createClient());
 
   const getToken = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await supabaseRef.current.auth.getSession();
     return session?.access_token;
-  }, [supabase]);
+  }, []);
 
   const fetchProducts = useCallback(async () => {
     try {
