@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Header, StatsCard } from '@/components/dashboard';
+import { Header, StatsCard, OnboardingWizard } from '@/components/dashboard';
 import { createClient } from '@/lib/supabase/client';
 
 interface AnalyticsSummary {
@@ -104,6 +104,9 @@ export default function DashboardHome() {
       />
 
       <main className="flex-1 overflow-y-auto p-6">
+        {/* Onboarding Wizard - shown for new creators */}
+        <OnboardingWizard />
+
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatsCard

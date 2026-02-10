@@ -3,3 +3,4 @@ export { Header } from './Header';
 export { StatsCard } from './StatsCard';
 export { GoLive } from './GoLive';
 export { PreStreamChecklist } from './PreStreamChecklist';
+export { OnboardingWizard } from './OnboardingWizard';

@@ -27,6 +27,10 @@ dotenv.config({ path: resolve(workspaceRoot, '.env.local') });
 dotenv.config({ path: resolve(workspaceRoot, '.env') });
 
 async function start() {
+  // Initialize Sentry before anything else
+  const { initSentry } = await import('./lib/sentry.js');
+  initSentry();
+
   // Dynamic imports after env is loaded
   const { buildApp } = await import('./app.js');
   const { env } = await import('./config/env.js');

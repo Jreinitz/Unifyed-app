@@ -19,6 +19,7 @@
     "@fastify/jwt": "^9.0.2",
     "@fastify/rate-limit": "^10.2.1",
     "@fastify/websocket": "^11.0.1",
+    "@sentry/node": "^10.38.0",
     "@supabase/supabase-js": "^2.93.1",
     "@unifyed/chat": "workspace:*",
     "@unifyed/db": "workspace:*",

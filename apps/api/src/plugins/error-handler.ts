@@ -1,6 +1,7 @@
 import { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import { AppError, ErrorCodes } from '@unifyed/utils';
+import { Sentry } from '../lib/sentry.js';
 
 export function errorHandler(
   error: FastifyError,
@@ -8,6 +9,19 @@ export function errorHandler(
   reply: FastifyReply
 ) {
   request.log.error(error);
+
+  // Report unexpected errors to Sentry (skip expected errors like validation, auth, rate limit)
+  if (!(error instanceof AppError) && !(error instanceof ZodError) && 
+      error.statusCode !== 401 && error.statusCode !== 429 && !error.validation) {
+    Sentry.captureException(error, {
+      extra: {
+        url: request.url,
+        method: request.method,
+        params: request.params,
+        query: request.query,
+      },
+    });
+  }
 
   // Handle AppError
   if (error instanceof AppError) {
