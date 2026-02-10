@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/dashboard';
+import { createClient } from '@/lib/supabase/client';
 
 interface OfferProduct {
   productId: string;
@@ -36,8 +37,9 @@ export default function OffersPage() {
 
   const fetchOffers = useCallback(async () => {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
         setError('Not authenticated');
         setLoading(false);
         return;
@@ -45,7 +47,7 @@ export default function OffersPage() {
 
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       const res = await fetch(`${apiUrl}/offers`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
       if (!res.ok) {
@@ -67,13 +69,14 @@ export default function OffersPage() {
 
   const handleStatusChange = async (offerId: string, newStatus: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/offers/${offerId}`, {
         method: 'PATCH',
         headers: { 
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${session?.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ status: newStatus }),
@@ -95,12 +98,13 @@ export default function OffersPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/offers/${offerId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
       });
 
       if (!res.ok) {
@@ -304,13 +308,14 @@ function CreateOfferModal({ onClose, onCreated }: CreateOfferModalProps) {
 
     try {
       setSubmitting(true);
-      const token = localStorage.getItem('token');
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/offers`, {
         method: 'POST',
         headers: { 
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${session?.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

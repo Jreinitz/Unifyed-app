@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/dashboard';
+import { createClient } from '@/lib/supabase/client';
 
 interface Creator {
   id: string;
@@ -46,6 +47,12 @@ function SettingsContent() {
   const [name, setName] = useState('');
   const [handle, setHandle] = useState('');
 
+  const getToken = useCallback(async () => {
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  }, []);
+
   useEffect(() => {
     // Check URL params for Stripe Connect return
     if (searchParams.get('connected') === 'true') {
@@ -61,7 +68,7 @@ function SettingsContent() {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       if (!token) {
         router.push('/login');
         return;
@@ -107,7 +114,7 @@ function SettingsContent() {
     
     try {
       setSaving(true);
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/auth/profile`, {
@@ -138,7 +145,7 @@ function SettingsContent() {
 
   const handleConnectStripe = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/payments/connect/onboard`, {
@@ -172,7 +179,7 @@ function SettingsContent() {
 
   const handleStripeDashboard = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/payments/connect/dashboard`, {
@@ -197,7 +204,7 @@ function SettingsContent() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/payments/connect`, {
@@ -219,8 +226,9 @@ function SettingsContent() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
     router.push('/login');
   };
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/dashboard';
+import { createClient } from '@/lib/supabase/client';
 
 interface SessionTemplate {
   id: string;
@@ -47,9 +48,15 @@ export default function TemplatesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<SessionTemplate | null>(null);
 
+  const getToken = useCallback(async () => {
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  }, []);
+
   const fetchTemplates = useCallback(async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       if (!token) {
         setError('Not authenticated');
         setLoading(false);
@@ -76,7 +83,7 @@ export default function TemplatesPage() {
 
   const fetchOffersAndProducts = useCallback(async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       if (!token) return;
 
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
@@ -111,7 +118,7 @@ export default function TemplatesPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/session-templates/${templateId}`, {
@@ -131,7 +138,7 @@ export default function TemplatesPage() {
 
   const handleSetDefault = async (templateId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/session-templates/${templateId}`, {
@@ -155,7 +162,7 @@ export default function TemplatesPage() {
 
   const handleApplyTemplate = async (templateId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/session-templates/${templateId}/apply`, {
@@ -385,7 +392,7 @@ function TemplateModal({ template, offers, products, onClose, onSaved }: Templat
 
     try {
       setSubmitting(true);
-      const token = localStorage.getItem('token');
+      const token = await getToken();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const body = {

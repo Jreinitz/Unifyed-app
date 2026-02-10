@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/dashboard';
+import { createClient } from '@/lib/supabase/client';
 
 interface Replay {
   id: string;
@@ -44,8 +45,9 @@ export default function ReplaysPage() {
 
   const fetchReplays = useCallback(async () => {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
         setError('Not authenticated');
         setLoading(false);
         return;
@@ -53,7 +55,7 @@ export default function ReplaysPage() {
 
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       const res = await fetch(`${apiUrl}/replays?limit=50`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
       if (!res.ok) {
@@ -76,13 +78,14 @@ export default function ReplaysPage() {
   const handleSync = async () => {
     try {
       setSyncing(true);
-      const token = localStorage.getItem('token');
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
       const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
       
       const res = await fetch(`${apiUrl}/replays/sync`, {
         method: 'POST',
         headers: { 
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${session?.access_token}`,
           'Content-Type': 'application/json',
         },
         body: '{}',
