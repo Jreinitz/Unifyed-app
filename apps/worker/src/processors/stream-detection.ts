@@ -94,9 +94,6 @@ async function checkAllCreators(
   // Get all healthy streaming tool connections (Restream, StreamYard)
   const toolConnections = await db.query.streamingToolConnections.findMany({
     where: (t, { eq }) => eq(t.status, 'connected'),
-    with: {
-      profile: true,
-    },
   });
   
   // Check Restream connections first (most efficient - gets all platforms at once)
