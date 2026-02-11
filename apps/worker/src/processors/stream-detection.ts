@@ -23,16 +23,15 @@ interface StreamDetectionResult {
   errors: string[];
 }
 
-// Decrypt credentials helper (simplified - in production use proper encryption)
+// Decrypt credentials using the proper AES-256-GCM decryption
 function decryptCredentials(encrypted: string): Record<string, unknown> {
-  try {
-    // In production, this would use proper AES-256 decryption with env.CREDENTIALS_ENCRYPTION_KEY
-    // For now, assume credentials are base64 encoded JSON
-    return JSON.parse(Buffer.from(encrypted, 'base64').toString('utf-8'));
-  } catch {
-    // Fall back to plain JSON for development
-    return JSON.parse(encrypted);
+  const { decrypt } = require('@unifyed/utils') as { decrypt: (text: string, key: string) => string };
+  const encryptionKey = process.env['CREDENTIALS_ENCRYPTION_KEY'];
+  if (!encryptionKey) {
+    throw new Error('CREDENTIALS_ENCRYPTION_KEY not set');
   }
+  const decrypted = decrypt(encrypted, encryptionKey);
+  return JSON.parse(decrypted);
 }
 
 /**
