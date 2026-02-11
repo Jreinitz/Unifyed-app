@@ -1,4 +1,5 @@
 import { Job } from 'bullmq';
+import * as nodeCrypto from 'crypto';
 import type { Database } from '@unifyed/db';
 import { liveSessions, streams } from '@unifyed/db';
 import { eq, and, inArray } from 'drizzle-orm';
@@ -25,12 +26,23 @@ interface StreamDetectionResult {
 
 // Decrypt credentials using the proper AES-256-GCM decryption
 function decryptCredentials(encrypted: string): Record<string, unknown> {
-  const { decrypt } = require('@unifyed/utils') as { decrypt: (text: string, key: string) => string };
   const encryptionKey = process.env['CREDENTIALS_ENCRYPTION_KEY'];
   if (!encryptionKey) {
     throw new Error('CREDENTIALS_ENCRYPTION_KEY not set');
   }
-  const decrypted = decrypt(encrypted, encryptionKey);
+  // AES-256-GCM decryption (matches @unifyed/utils encrypt)
+  const parts = encrypted.split(':');
+  if (parts.length !== 3) throw new Error('Invalid encrypted text format');
+  const [ivHex, authTagHex, encryptedHex] = parts;
+  if (!ivHex || !authTagHex || !encryptedHex) throw new Error('Invalid encrypted text format');
+  const key = Buffer.from(encryptionKey, 'hex');
+  const iv = Buffer.from(ivHex, 'hex');
+  const authTag = Buffer.from(authTagHex, 'hex');
+  const { createDecipheriv } = nodeCrypto;
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(authTag);
+  let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
   return JSON.parse(decrypted);
 }
 
