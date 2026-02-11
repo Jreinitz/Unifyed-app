@@ -17,12 +17,12 @@ export async function createWorkers(): Promise<Worker[]> {
   
   // Parse Redis URL for BullMQ connection
   const redisUrl = new URL(env.REDIS_URL);
-  const connection = { 
+  const connection: { host: string; port: number; password?: string; username?: string } = { 
     host: redisUrl.hostname || 'localhost', 
     port: parseInt(redisUrl.port || '6379', 10),
-    password: redisUrl.password || undefined,
-    username: redisUrl.username || undefined,
   };
+  if (redisUrl.password) connection.password = redisUrl.password;
+  if (redisUrl.username) connection.username = redisUrl.username;
   
   const workers: Worker[] = [];
   
