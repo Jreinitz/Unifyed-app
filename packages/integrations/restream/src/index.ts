@@ -252,10 +252,14 @@ export async function checkLiveStatus(
   });
 
   if (!response.ok) {
+    console.log(`Restream checkLiveStatus API returned ${response.status}`);
     return { isLive: false };
   }
 
-  const data = (await response.json()) as {
+  const rawData = await response.json();
+  console.log('Restream channel-set response:', JSON.stringify(rawData).slice(0, 500));
+  
+  const data = rawData as {
     streaming_servers?: Array<{
       id: string;
       active: boolean;
@@ -275,6 +279,7 @@ export async function checkLiveStatus(
 
   // Check if any streaming server is active
   const activeServer = data.streaming_servers?.find((s) => s.active);
+  console.log(`Restream streaming_servers: ${JSON.stringify(data.streaming_servers?.map(s => ({ id: s.id, active: s.active })))}, activeServer: ${!!activeServer}`);
   
   if (!activeServer) {
     return { isLive: false };
