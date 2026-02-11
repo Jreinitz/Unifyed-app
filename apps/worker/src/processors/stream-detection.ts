@@ -102,12 +102,15 @@ async function checkAllCreators(
   
   // Check Restream connections first (most efficient - gets all platforms at once)
   for (const conn of toolConnections) {
+    console.log(`🔄 Checking connection: tool=${conn.tool}, id=${conn.id}, status=${conn.status}`);
     if (conn.tool === 'restream') {
       try {
         await checkRestreamConnection(db, conn.id, result);
         result.checked++;
+        console.log(`✅ Restream check completed for ${conn.id}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`❌ Restream check failed for ${conn.id}: ${message}`);
         result.errors.push(`Restream ${conn.id}: ${message}`);
       }
     }
