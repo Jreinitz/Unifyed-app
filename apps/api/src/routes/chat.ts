@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, count, sum } from 'drizzle-orm';
+import { eq, and, count, sum, desc } from 'drizzle-orm';
 import { AppError, ErrorCodes } from '@unifyed/utils';
 import { authPlugin } from '../plugins/auth.js';
 import { getChatService, createChatService } from '../services/chat.service.js';
@@ -238,8 +238,9 @@ export async function chatWebSocketRoutes(fastify: FastifyInstance) {
       }));
     }
 
-    // Session stats polling
+    // Session stats polling + sale notifications
     let statsIntervalId: NodeJS.Timeout | null = null;
+    let lastKnownOrderCount = 0;
 
     const fetchAndSendSessionStats = async () => {
       try {
@@ -293,6 +294,43 @@ export async function chatWebSocketRoutes(fastify: FastifyInstance) {
         }
 
         const viewsByPlatform = session.viewsByPlatform as Record<string, number> | null;
+
+        // Check for new orders and send sale notifications
+        if (orderCount > lastKnownOrderCount && lastKnownOrderCount > 0) {
+          // Fetch the most recent order(s)
+          const recentOrders = await fastify.db
+            .select({
+              id: orders.id,
+              total: orders.total,
+              currency: orders.currency,
+              customerName: orders.customerName,
+              customerEmail: orders.customerEmail,
+              createdAt: orders.createdAt,
+            })
+            .from(orders)
+            .innerJoin(attributionContexts, eq(orders.attributionContextId, attributionContexts.id))
+            .where(eq(attributionContexts.liveSessionId, session.id))
+            .orderBy(desc(orders.createdAt))
+            .limit(orderCount - lastKnownOrderCount);
+
+          for (const newOrder of recentOrders) {
+            try {
+              socket.send(JSON.stringify({
+                type: 'sale_notification',
+                data: {
+                  orderId: newOrder.id,
+                  amount: newOrder.total,
+                  currency: newOrder.currency || 'USD',
+                  customerName: newOrder.customerName || 'Customer',
+                  timestamp: newOrder.createdAt,
+                },
+              }));
+            } catch {
+              // Socket might be closed
+            }
+          }
+        }
+        lastKnownOrderCount = orderCount;
 
         socket.send(JSON.stringify({
           type: 'session_stats',

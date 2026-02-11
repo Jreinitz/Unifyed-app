@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { ChatPanel, LiveStats, QuickActions } from '@/components/command-center';
+import { ChatPanel, LiveStats, QuickActions, ProductQueue } from '@/components/command-center';
 import type { ChatMessage, ChatState, ChatPlatform } from '@unifyed/types';
 
 interface SessionStatsData {
@@ -136,6 +136,37 @@ export default function CommandCenterPage() {
                 durationIntervalRef.current = null;
               }
               break;
+
+            case 'sale_notification': {
+              // Show sale notification toast
+              const sale = data.data;
+              const amount = (sale.amount / 100).toFixed(2);
+              const notification = {
+                id: sale.orderId,
+                type: 'sale' as const,
+                message: `${sale.customerName} just purchased for $${amount}!`,
+                timestamp: sale.timestamp,
+              };
+              // Add to messages as a system message for visibility
+              setMessages((prev) => [...prev, {
+                id: `sale-${sale.orderId}`,
+                platform: 'system' as ChatPlatform,
+                type: 'system',
+                content: `💰 SALE! ${notification.message}`,
+                user: { username: 'Unifyed', displayName: 'Unifyed', avatar: undefined },
+                timestamp: new Date(sale.timestamp),
+                signals: undefined,
+              }]);
+              // Play notification sound
+              try {
+                const audio = new Audio('/sounds/sale.mp3');
+                audio.volume = 0.5;
+                audio.play().catch(() => {});
+              } catch {
+                // Audio might not be available
+              }
+              break;
+            }
 
             case 'error':
               console.error('Chat error:', data.message);
@@ -373,70 +404,81 @@ export default function CommandCenterPage() {
           />
         </div>
 
-        {/* Right sidebar - Activity feed */}
-        <div className="col-span-3">
-          <div className="bg-gray-900 rounded-lg p-4 h-full">
-            <h3 className="font-semibold text-white text-sm mb-4">Activity Feed</h3>
-            
-            {/* Gift/donation feed */}
-            <div className="space-y-2">
-              {messages
-                .filter((m) => ['gift', 'subscription', 'raid'].includes(m.type))
-                .slice(-10)
-                .reverse()
-                .map((msg) => (
-                  <div
-                    key={msg.id}
-                    className="p-2 bg-gray-800/50 rounded text-sm"
-                  >
-                    <span className="font-medium text-yellow-400">
-                      {msg.type === 'gift' && '🎁'}
-                      {msg.type === 'subscription' && '⭐'}
-                      {msg.type === 'raid' && '🚀'}
-                    </span>
-                    <span className="text-gray-300 ml-1">
-                      {msg.user.username}
-                    </span>
-                    <span className="text-gray-500 ml-1 text-xs">
-                      {msg.content}
-                    </span>
-                  </div>
-                ))}
-              
-              {messages.filter((m) => ['gift', 'subscription', 'raid'].includes(m.type)).length === 0 && (
-                <div className="text-center text-gray-500 text-sm py-8">
-                  No activity yet
-                </div>
-              )}
-            </div>
+        {/* Right sidebar - Product Queue + Activity */}
+        <div className="col-span-3 flex flex-col gap-4 h-full">
+          {/* Product Queue - top half */}
+          <div className="flex-1 min-h-0">
+            <ProductQueue
+              sessionId={sessionStats.sessionId}
+              isLive={isLive}
+            />
+          </div>
 
-            {/* Buying intent signals */}
-            <div className="mt-6 pt-4 border-t border-gray-800">
-              <h4 className="text-xs text-gray-500 uppercase tracking-wide mb-2">🎯 Buying Signals</h4>
+          {/* Activity Feed - bottom half */}
+          <div className="flex-1 min-h-0">
+            <div className="bg-gray-900 rounded-lg p-4 h-full overflow-y-auto">
+              <h3 className="font-semibold text-white text-sm mb-4">Activity Feed</h3>
+              
+              {/* Gift/donation feed */}
               <div className="space-y-2">
                 {messages
-                  .filter((m) => m.signals?.hasBuyingIntent)
-                  .slice(-5)
+                  .filter((m) => ['gift', 'subscription', 'raid'].includes(m.type))
+                  .slice(-10)
                   .reverse()
                   .map((msg) => (
                     <div
                       key={msg.id}
-                      className="p-2 bg-green-500/10 border border-green-500/30 rounded text-sm"
+                      className="p-2 bg-gray-800/50 rounded text-sm"
                     >
-                      <span className="font-medium text-green-400">
-                        {msg.user.username}:
+                      <span className="font-medium text-yellow-400">
+                        {msg.type === 'gift' && '🎁'}
+                        {msg.type === 'subscription' && '⭐'}
+                        {msg.type === 'raid' && '🚀'}
                       </span>
                       <span className="text-gray-300 ml-1">
-                        {msg.content.slice(0, 50)}...
+                        {msg.user.username}
+                      </span>
+                      <span className="text-gray-500 ml-1 text-xs">
+                        {msg.content}
                       </span>
                     </div>
                   ))}
                 
-                {messages.filter((m) => m.signals?.hasBuyingIntent).length === 0 && (
+                {messages.filter((m) => ['gift', 'subscription', 'raid'].includes(m.type)).length === 0 && (
                   <div className="text-center text-gray-500 text-sm py-4">
-                    AI will detect buying intent
+                    No activity yet
                   </div>
                 )}
+              </div>
+
+              {/* Buying intent signals */}
+              <div className="mt-4 pt-3 border-t border-gray-800">
+                <h4 className="text-xs text-gray-500 uppercase tracking-wide mb-2">Buying Signals</h4>
+                <div className="space-y-2">
+                  {messages
+                    .filter((m) => m.signals?.hasBuyingIntent)
+                    .slice(-5)
+                    .reverse()
+                    .map((msg) => (
+                      <div
+                        key={msg.id}
+                        className="p-2 bg-green-500/10 border border-green-500/30 rounded text-sm"
+                      >
+                        <span className="font-medium text-green-400">
+                          {msg.user.username}:
+                        </span>
+                        <span className="text-gray-300 ml-1 text-xs">
+                          {msg.content.slice(0, 50)}...
+                        </span>
+                      </div>
+                    ))}
+                  
+                  {messages.filter((m) => m.signals?.hasBuyingIntent).length === 0 && (
+                    <div className="text-center text-gray-500 text-sm py-2">
+                      AI will detect buying intent
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

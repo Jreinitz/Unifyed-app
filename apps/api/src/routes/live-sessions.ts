@@ -1,9 +1,11 @@
+import { randomBytes } from 'crypto';
 import { FastifyInstance } from 'fastify';
 import { eq, and, count, desc, inArray, sum } from 'drizzle-orm';
-import { liveSessions, streams, platformConnections, sessionTemplates, offers, products, orders, checkoutSessions, attributionContexts } from '@unifyed/db/schema';
+import { liveSessions, streams, platformConnections, sessionTemplates, offers, products, orders, checkoutSessions, attributionContexts, shortLinks } from '@unifyed/db/schema';
 import { z } from 'zod';
 import { AppError, ErrorCodes } from '@unifyed/utils';
 import { authPlugin } from '../plugins/auth.js';
+import { env } from '../config/env.js';
 import * as restreamIntegration from '@unifyed/integrations-restream';
 
 // Request/Response schemas
@@ -719,5 +721,464 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
       .orderBy(desc(sessionTemplates.isDefault), desc(sessionTemplates.createdAt));
 
     return reply.send({ templates });
+  });
+
+  // ============================================
+  // Product Queue Endpoints
+  // ============================================
+
+  interface ProductQueueItem {
+    productId: string;
+    title: string;
+    imageUrl: string | null;
+    price: string;
+    variantId?: string;
+    offerId?: string;
+    shortLinkCode?: string;
+  }
+
+  interface ProductQueueState {
+    items: ProductQueueItem[];
+    currentIndex: number;
+    autoDropEnabled: boolean;
+    autoDropIntervalMinutes: number;
+    lastDroppedAt: string | null;
+  }
+
+  function getQueueState(metadata: Record<string, unknown> | null): ProductQueueState {
+    const queue = metadata?.productQueue as ProductQueueState | undefined;
+    return queue || {
+      items: [],
+      currentIndex: 0,
+      autoDropEnabled: false,
+      autoDropIntervalMinutes: 5,
+      lastDroppedAt: null,
+    };
+  }
+
+  const queueSessionParamsSchema = z.object({
+    id: z.string().uuid(),
+  });
+
+  // GET /live-sessions/:id/queue - Get current product queue
+  fastify.get('/:id/queue', async (request, reply) => {
+    const { id } = queueSessionParamsSchema.parse(request.params);
+
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    const queue = getQueueState(session.metadata as Record<string, unknown> | null);
+    const currentProduct = queue.items[queue.currentIndex] || null;
+
+    return reply.send({
+      queue: {
+        items: queue.items,
+        currentIndex: queue.currentIndex,
+        currentProduct,
+        totalProducts: queue.items.length,
+        autoDropEnabled: queue.autoDropEnabled,
+        autoDropIntervalMinutes: queue.autoDropIntervalMinutes,
+        lastDroppedAt: queue.lastDroppedAt,
+      },
+    });
+  });
+
+  // POST /live-sessions/:id/queue - Set the full product queue
+  const setQueueBodySchema = z.object({
+    productIds: z.array(z.string().uuid()).min(1),
+    offerId: z.string().uuid().optional(), // Apply this offer's discount to all products
+  });
+
+  fastify.post('/:id/queue', async (request, reply) => {
+    const { id } = queueSessionParamsSchema.parse(request.params);
+    const body = setQueueBodySchema.parse(request.body);
+
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    // Fetch product details
+    const productList = await fastify.db
+      .select({
+        id: products.id,
+        title: products.title,
+        imageUrl: products.imageUrl,
+      })
+      .from(products)
+      .where(inArray(products.id, body.productIds));
+
+    // Build queue items in the order provided
+    const productMap = new Map(productList.map(p => [p.id, p]));
+    const queueItems: ProductQueueItem[] = body.productIds
+      .filter(pid => productMap.has(pid))
+      .map(pid => {
+        const product = productMap.get(pid)!;
+        return {
+          productId: product.id,
+          title: product.title,
+          imageUrl: product.imageUrl,
+          price: '', // Will be populated from variants
+          offerId: body.offerId,
+        };
+      });
+
+    const existingMetadata = (session.metadata as Record<string, unknown>) || {};
+    const newQueue: ProductQueueState = {
+      items: queueItems,
+      currentIndex: 0,
+      autoDropEnabled: false,
+      autoDropIntervalMinutes: 5,
+      lastDroppedAt: null,
+    };
+
+    await fastify.db
+      .update(liveSessions)
+      .set({
+        metadata: { ...existingMetadata, productQueue: newQueue },
+        updatedAt: new Date(),
+      })
+      .where(eq(liveSessions.id, id));
+
+    return reply.status(201).send({
+      queue: {
+        items: newQueue.items,
+        currentIndex: 0,
+        currentProduct: newQueue.items[0] || null,
+        totalProducts: newQueue.items.length,
+      },
+    });
+  });
+
+  // POST /live-sessions/:id/queue/next - Advance to next product
+  fastify.post('/:id/queue/next', async (request, reply) => {
+    const { id } = queueSessionParamsSchema.parse(request.params);
+
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    const metadata = (session.metadata as Record<string, unknown>) || {};
+    const queue = getQueueState(metadata);
+
+    if (queue.items.length === 0) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, 'Product queue is empty');
+    }
+
+    // Advance to next (wrap around to beginning)
+    const nextIndex = (queue.currentIndex + 1) % queue.items.length;
+    queue.currentIndex = nextIndex;
+    queue.lastDroppedAt = null; // Reset drop timer for new product
+
+    await fastify.db
+      .update(liveSessions)
+      .set({
+        metadata: { ...metadata, productQueue: queue },
+        updatedAt: new Date(),
+      })
+      .where(eq(liveSessions.id, id));
+
+    const currentProduct = queue.items[nextIndex] || null;
+
+    return reply.send({
+      queue: {
+        currentIndex: nextIndex,
+        currentProduct,
+        totalProducts: queue.items.length,
+      },
+    });
+  });
+
+  // POST /live-sessions/:id/queue/spotlight - Spotlight a specific product by index
+  const spotlightBodySchema = z.object({
+    index: z.number().min(0),
+  });
+
+  fastify.post('/:id/queue/spotlight', async (request, reply) => {
+    const { id } = queueSessionParamsSchema.parse(request.params);
+    const { index: targetIndex } = spotlightBodySchema.parse(request.body);
+
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    const metadata = (session.metadata as Record<string, unknown>) || {};
+    const queue = getQueueState(metadata);
+
+    if (targetIndex >= queue.items.length) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, 'Index out of range');
+    }
+
+    queue.currentIndex = targetIndex;
+    queue.lastDroppedAt = null;
+
+    await fastify.db
+      .update(liveSessions)
+      .set({
+        metadata: { ...metadata, productQueue: queue },
+        updatedAt: new Date(),
+      })
+      .where(eq(liveSessions.id, id));
+
+    return reply.send({
+      queue: {
+        currentIndex: targetIndex,
+        currentProduct: queue.items[targetIndex],
+        totalProducts: queue.items.length,
+      },
+    });
+  });
+
+  // POST /live-sessions/:id/queue/add - Add a product mid-stream
+  const addToQueueBodySchema = z.object({
+    productId: z.string().uuid(),
+    offerId: z.string().uuid().optional(),
+    position: z.enum(['next', 'end']).default('end'),
+  });
+
+  fastify.post('/:id/queue/add', async (request, reply) => {
+    const { id } = queueSessionParamsSchema.parse(request.params);
+    const body = addToQueueBodySchema.parse(request.body);
+
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    // Fetch product details
+    const [product] = await fastify.db
+      .select({
+        id: products.id,
+        title: products.title,
+        imageUrl: products.imageUrl,
+      })
+      .from(products)
+      .where(eq(products.id, body.productId))
+      .limit(1);
+
+    if (!product) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Product not found');
+    }
+
+    const metadata = (session.metadata as Record<string, unknown>) || {};
+    const queue = getQueueState(metadata);
+
+    const newItem: ProductQueueItem = {
+      productId: product.id,
+      title: product.title,
+      imageUrl: product.imageUrl,
+      price: '',
+      offerId: body.offerId,
+    };
+
+    if (body.position === 'next') {
+      // Insert right after the current product
+      queue.items.splice(queue.currentIndex + 1, 0, newItem);
+    } else {
+      // Add to the end
+      queue.items.push(newItem);
+    }
+
+    await fastify.db
+      .update(liveSessions)
+      .set({
+        metadata: { ...metadata, productQueue: queue },
+        updatedAt: new Date(),
+      })
+      .where(eq(liveSessions.id, id));
+
+    return reply.send({
+      queue: {
+        items: queue.items,
+        currentIndex: queue.currentIndex,
+        currentProduct: queue.items[queue.currentIndex] || null,
+        totalProducts: queue.items.length,
+        addedProduct: newItem,
+      },
+    });
+  });
+
+  // PATCH /live-sessions/:id/queue/settings - Update auto-drop settings
+  const queueSettingsBodySchema = z.object({
+    autoDropEnabled: z.boolean().optional(),
+    autoDropIntervalMinutes: z.number().min(1).max(30).optional(),
+  });
+
+  fastify.patch('/:id/queue/settings', async (request, reply) => {
+    const { id } = queueSessionParamsSchema.parse(request.params);
+    const body = queueSettingsBodySchema.parse(request.body);
+
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    const metadata = (session.metadata as Record<string, unknown>) || {};
+    const queue = getQueueState(metadata);
+
+    if (body.autoDropEnabled !== undefined) {
+      queue.autoDropEnabled = body.autoDropEnabled;
+    }
+    if (body.autoDropIntervalMinutes !== undefined) {
+      queue.autoDropIntervalMinutes = body.autoDropIntervalMinutes;
+    }
+
+    await fastify.db
+      .update(liveSessions)
+      .set({
+        metadata: { ...metadata, productQueue: queue },
+        updatedAt: new Date(),
+      })
+      .where(eq(liveSessions.id, id));
+
+    return reply.send({
+      settings: {
+        autoDropEnabled: queue.autoDropEnabled,
+        autoDropIntervalMinutes: queue.autoDropIntervalMinutes,
+      },
+    });
+  });
+
+  // POST /live-sessions/:id/queue/drop - Manually drop current product link in chat
+  fastify.post('/:id/queue/drop', async (request, reply) => {
+    const { id } = queueSessionParamsSchema.parse(request.params);
+
+    const [session] = await fastify.db
+      .select()
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.id, id),
+        eq(liveSessions.creatorId, request.creator.id)
+      ))
+      .limit(1);
+
+    if (!session) {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Live session not found');
+    }
+
+    const metadata = (session.metadata as Record<string, unknown>) || {};
+    const queue = getQueueState(metadata);
+    const currentProduct = queue.items[queue.currentIndex];
+
+    if (!currentProduct) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, 'No product currently spotlighted');
+    }
+
+    // Generate a short link for this product if it has an offer
+    let linkUrl = '';
+    if (currentProduct.offerId) {
+      const code = randomBytes(4).toString('hex');
+      
+      const [attrCtx] = await fastify.db
+        .insert(attributionContexts)
+        .values({
+          creatorId: request.creator.id,
+          platform: null,
+          surface: 'live',
+          metadata: { source: 'product_queue', sessionId: id },
+        })
+        .returning();
+
+      if (attrCtx) {
+        const [link] = await fastify.db
+          .insert(shortLinks)
+          .values({
+            creatorId: request.creator.id,
+            code,
+            offerId: currentProduct.offerId,
+            attributionContextId: attrCtx.id,
+            name: `Queue: ${currentProduct.title}`,
+            metadata: { source: 'product_queue', sessionId: id, productId: currentProduct.productId },
+          })
+          .returning();
+
+        if (link) {
+          linkUrl = `${env.API_URL}/go/${code}`;
+          currentProduct.shortLinkCode = code;
+        }
+      }
+    }
+
+    // Send to chat
+    const { getChatService } = await import('../services/chat.service.js');
+    const chatService = getChatService();
+
+    if (chatService && linkUrl) {
+      const chatMessage = `🛍️ ${currentProduct.title}\n🔗 ${linkUrl}`;
+      try {
+        await chatService.sendMessage(request.creator.id, chatMessage);
+      } catch {
+        // Chat might not be active
+      }
+    }
+
+    // Update last dropped timestamp
+    queue.lastDroppedAt = new Date().toISOString();
+    await fastify.db
+      .update(liveSessions)
+      .set({
+        metadata: { ...metadata, productQueue: queue },
+        updatedAt: new Date(),
+      })
+      .where(eq(liveSessions.id, id));
+
+    return reply.send({
+      dropped: true,
+      product: currentProduct,
+      linkUrl,
+      droppedAt: queue.lastDroppedAt,
+    });
   });
 }
