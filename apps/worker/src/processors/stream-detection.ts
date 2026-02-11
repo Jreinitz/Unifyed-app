@@ -92,9 +92,16 @@ async function checkAllCreators(
   console.log('🔍 Checking all creators for live streams...');
   
   // Get all healthy streaming tool connections (Restream, StreamYard)
-  const toolConnections = await db.query.streamingToolConnections.findMany({
-    where: (t, { eq }) => eq(t.status, 'connected'),
-  });
+  let toolConnections;
+  try {
+    toolConnections = await db.query.streamingToolConnections.findMany({
+      where: (t, { eq }) => eq(t.status, 'connected'),
+    });
+    console.log(`📡 Found ${toolConnections.length} streaming tool connections`);
+  } catch (queryError) {
+    console.error('❌ Failed to query streaming tool connections:', queryError);
+    toolConnections = [];
+  }
   
   // Check Restream connections first (most efficient - gets all platforms at once)
   for (const conn of toolConnections) {
