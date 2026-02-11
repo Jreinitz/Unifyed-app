@@ -732,9 +732,9 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
     title: string;
     imageUrl: string | null;
     price: string;
-    variantId?: string;
-    offerId?: string;
-    shortLinkCode?: string;
+    variantId?: string | undefined;
+    offerId?: string | undefined;
+    shortLinkCode?: string | undefined;
   }
 
   interface ProductQueueState {
@@ -746,7 +746,7 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
   }
 
   function getQueueState(metadata: Record<string, unknown> | null): ProductQueueState {
-    const queue = metadata?.productQueue as ProductQueueState | undefined;
+    const queue = metadata?.['productQueue'] as ProductQueueState | undefined;
     return queue || {
       items: [],
       currentIndex: 0,
