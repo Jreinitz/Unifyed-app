@@ -286,7 +286,7 @@ export async function checkLiveStatus(
   const activeEvent = liveEvents[0]!;
   
   // Map destinations to channels
-  const channels: RestreamChannel[] = (activeEvent.destinations ?? []).map((dest, i) => ({
+  const channels: RestreamChannel[] = (activeEvent.destinations ?? []).map((dest) => ({
     id: dest.channelId,
     name: `Channel ${dest.channelId}`,
     platform: String(dest.streamingPlatformId),
