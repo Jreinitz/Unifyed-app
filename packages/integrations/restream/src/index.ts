@@ -245,7 +245,8 @@ export async function getChannels(accessToken: string): Promise<RestreamDestinat
 export async function checkLiveStatus(
   accessToken: string
 ): Promise<{ isLive: boolean; broadcast?: RestreamBroadcast }> {
-  const response = await fetch('https://api.restream.io/v2/user/channel-set', {
+  // Use the events/in-progress endpoint to check for active streams
+  const response = await fetch('https://api.restream.io/v2/user/events/in-progress', {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
@@ -256,52 +257,52 @@ export async function checkLiveStatus(
     return { isLive: false };
   }
 
-  const rawData = await response.json();
-  console.log('Restream channel-set response:', JSON.stringify(rawData).slice(0, 500));
-  
-  const data = rawData as {
-    streaming_servers?: Array<{
-      id: string;
-      active: boolean;
-      title?: string;
-      started_at?: string;
+  const events = (await response.json()) as Array<{
+    id: string;
+    status: string;
+    title: string;
+    description?: string;
+    startedAt?: number;
+    finishedAt?: number;
+    isRecordOnly?: boolean;
+    destinations?: Array<{
+      channelId: number;
+      externalUrl?: string;
+      streamingPlatformId: number;
     }>;
-    channels?: Array<{
-      id: number;
-      name: string;
-      platform: string;
-      enabled: boolean;
-      active: boolean;
-      display_name?: string;
-      embed_url?: string;
-    }>;
-  };
+  }>;
 
-  // Check if any streaming server is active
-  const activeServer = data.streaming_servers?.find((s) => s.active);
-  console.log(`Restream streaming_servers: ${JSON.stringify(data.streaming_servers?.map(s => ({ id: s.id, active: s.active })))}, activeServer: ${!!activeServer}`);
-  
-  if (!activeServer) {
+  console.log(`Restream in-progress events: ${events.length}`);
+
+  // Filter out record-only events
+  const liveEvents = Array.isArray(events) 
+    ? events.filter(e => e.status === 'in-progress' && !e.isRecordOnly)
+    : [];
+
+  if (liveEvents.length === 0) {
     return { isLive: false };
   }
 
-  const channels: RestreamChannel[] = (data.channels ?? []).map((ch) => ({
-    id: ch.id,
-    name: ch.name,
-    platform: ch.platform,
-    enabled: ch.enabled,
-    active: ch.active,
-    displayName: ch.display_name,
-    embedUrl: ch.embed_url,
+  const activeEvent = liveEvents[0]!;
+  
+  // Map destinations to channels
+  const channels: RestreamChannel[] = (activeEvent.destinations ?? []).map((dest, i) => ({
+    id: dest.channelId,
+    name: `Channel ${dest.channelId}`,
+    platform: String(dest.streamingPlatformId),
+    enabled: true,
+    active: true,
+    displayName: dest.externalUrl ?? undefined,
+    embedUrl: dest.externalUrl ?? undefined,
   }));
 
   return {
     isLive: true,
     broadcast: {
-      id: activeServer.id,
-      title: activeServer.title ?? 'Live Stream',
+      id: activeEvent.id,
+      title: activeEvent.title ?? 'Live Stream',
       status: 'live',
-      startedAt: activeServer.started_at,
+      startedAt: activeEvent.startedAt ? new Date(activeEvent.startedAt * 1000).toISOString() : undefined,
       channels,
     },
   };
