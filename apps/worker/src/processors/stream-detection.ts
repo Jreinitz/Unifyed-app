@@ -95,7 +95,7 @@ async function checkAllCreators(
   const toolConnections = await db.query.streamingToolConnections.findMany({
     where: (t, { eq }) => eq(t.status, 'connected'),
     with: {
-      creator: true,
+      profile: true,
     },
   });
   
