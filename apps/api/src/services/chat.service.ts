@@ -174,39 +174,9 @@ export class ChatService {
   private async getConnectionConfigs(creatorId: string): Promise<PlatformConfig[]> {
     const configs: PlatformConfig[] = [];
 
-    // Check for Restream connection (preferred)
-    const restreamConn = await this.db.query.streamingToolConnections.findFirst({
-      where: (t: any, { eq: whereEq, and: whereAnd }: any) => whereAnd(
-        whereEq(t.creatorId, creatorId),
-        whereEq(t.tool, 'restream'),
-        whereEq(t.status, 'connected')
-      ),
-    });
-
-    if (restreamConn) {
-      // Decrypt credentials using AES-256-GCM
-      let credentials: { accessToken: string };
-      try {
-        const decrypted = decrypt(restreamConn.credentials, this.encryptionKey);
-        credentials = JSON.parse(decrypted);
-      } catch (err) {
-        console.error('Failed to decrypt Restream credentials:', err);
-        // Skip this connection if decryption fails
-        return configs;
-      }
-
-      configs.push({
-        platform: 'restream',
-        enabled: true,
-        config: {
-          creatorId,
-          accessToken: credentials.accessToken,
-        },
-      });
-
-      // If Restream is available, we don't need direct platform connections
-      return configs;
-    }
+    // NOTE: Restream is used for stream relay but does NOT have a public chat API.
+    // Always use direct platform connections (YouTube, Twitch) for chat.
+    console.log(`💬 Building chat configs for creator ${creatorId} using direct platform connections`);
 
     // Get direct platform connections
     const platformConns = await this.db
