@@ -88,15 +88,23 @@ export default function CommandCenterPage() {
             timestamp: sale.timestamp,
           };
           // Add to messages as a system message for visibility
-          setMessages((prev) => [...prev, {
+          const saleMessage: ChatMessage = {
             id: `sale-${sale.orderId}`,
-            platform: 'system' as ChatPlatform,
+            platform: 'restream' as ChatPlatform,
             type: 'system',
             content: `💰 SALE! ${notification.message}`,
-            user: { username: 'Unifyed', displayName: 'Unifyed', avatar: undefined },
+            user: {
+              id: 'unifyed-system',
+              username: 'Unifyed',
+              profileImageUrl: undefined,
+              badges: [],
+              isModerator: false,
+              isSubscriber: false,
+              isVerified: false,
+            },
             timestamp: new Date(sale.timestamp),
-            signals: undefined,
-          }]);
+          };
+          setMessages((prev) => [...prev, saleMessage]);
           // Play notification sound
           try {
             const audio = new Audio('/sounds/sale.mp3');
@@ -358,15 +366,23 @@ export default function CommandCenterPage() {
       }));
 
       // Optimistic: show the message locally immediately
-      setMessages((prev) => [...prev, {
+      const localMessage: ChatMessage = {
         id: `local-${Date.now()}`,
         platform: 'restream' as ChatPlatform,
         type: 'chat',
         content,
-        user: { username: 'You', displayName: 'You', avatar: undefined },
+        user: {
+          id: 'local-user',
+          username: 'You',
+          profileImageUrl: undefined,
+          badges: [],
+          isModerator: false,
+          isSubscriber: false,
+          isVerified: false,
+        },
         timestamp: new Date(),
-        signals: undefined,
-      }]);
+      };
+      setMessages((prev) => [...prev, localMessage]);
     } else {
       setError('WebSocket not connected. Try refreshing the page.');
     }

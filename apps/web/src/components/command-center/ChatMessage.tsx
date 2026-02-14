@@ -78,7 +78,7 @@ export function ChatMessage({ message, onHighlight, onPin }: ChatMessageProps) {
           </span>
           
           {/* Badges */}
-          {message.user.badges.map((badge) => (
+          {(message.user.badges || []).map((badge) => (
             <span key={badge} className="text-xs" title={badge}>
               {badgeIcons[badge]}
             </span>
