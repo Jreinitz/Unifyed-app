@@ -3,19 +3,32 @@ import type { ChatMessage, ChatConnectionStatus, ChatState, ChatPlatform } from 
 import type { Database } from '@unifyed/db';
 import { eq, and } from 'drizzle-orm';
 import { platformConnections } from '@unifyed/db/schema';
-import { decrypt } from '@unifyed/utils';
+import { decrypt, encrypt } from '@unifyed/utils';
+import * as youtubeIntegration from '@unifyed/integrations-youtube';
+import * as twitchIntegration from '@unifyed/integrations-twitch';
 import { processMessage } from './ai-chat.service.js';
 
 /**
  * Chat Service
  * Manages chat aggregators for each creator and provides unified chat access
  */
+interface OAuthConfig {
+  youtubeClientId?: string;
+  youtubeClientSecret?: string;
+  twitchClientId?: string;
+  twitchClientSecret?: string;
+}
+
 export class ChatService {
   private aggregators: Map<string, ChatAggregator> = new Map();
   private messageCallbacks: Map<string, Set<(message: ChatMessage) => void>> = new Map();
   private stateCallbacks: Map<string, Set<(state: ChatState) => void>> = new Map();
 
-  constructor(private db: Database, private encryptionKey: string) {}
+  constructor(
+    private db: Database,
+    private encryptionKey: string,
+    private oauthConfig: OAuthConfig = {},
+  ) {}
 
   /**
    * Get or create a chat aggregator for a creator
@@ -169,6 +182,100 @@ export class ChatService {
   }
 
   /**
+   * Auto-refresh an expired token for a platform connection.
+   * Returns the new access token or null if refresh failed.
+   */
+  private async refreshTokenIfExpired(
+    conn: { id: string; platform: string; credentials: string; tokenExpiresAt: Date | null; metadata: unknown },
+  ): Promise<string | null> {
+    // Decrypt current credentials
+    let credentials: { accessToken?: string; refreshToken?: string; scope?: string };
+    try {
+      const decrypted = decrypt(conn.credentials, this.encryptionKey);
+      credentials = JSON.parse(decrypted);
+    } catch {
+      return null;
+    }
+
+    // Check if token is still valid (with 5 min buffer)
+    if (conn.tokenExpiresAt) {
+      const expiresAt = new Date(conn.tokenExpiresAt).getTime();
+      const now = Date.now();
+      if (expiresAt > now + 5 * 60 * 1000) {
+        // Token still valid
+        return credentials.accessToken || null;
+      }
+    }
+
+    // Token expired or no expiry info - try to refresh
+    if (!credentials.refreshToken) {
+      console.warn(`💬 ${conn.platform}: no refresh token available, cannot auto-refresh`);
+      return credentials.accessToken || null; // Return existing token, might still work
+    }
+
+    console.log(`💬 ${conn.platform}: token expired, auto-refreshing...`);
+
+    try {
+      let newAccessToken: string;
+      let newExpiresIn: number;
+
+      if (conn.platform === 'youtube' && this.oauthConfig.youtubeClientId && this.oauthConfig.youtubeClientSecret) {
+        const result = await youtubeIntegration.refreshAccessToken(credentials.refreshToken, {
+          clientId: this.oauthConfig.youtubeClientId,
+          clientSecret: this.oauthConfig.youtubeClientSecret,
+          redirectUri: '', // Not needed for refresh
+        });
+        newAccessToken = result.accessToken;
+        newExpiresIn = result.expiresIn;
+      } else if (conn.platform === 'twitch' && this.oauthConfig.twitchClientId && this.oauthConfig.twitchClientSecret) {
+        const result = await twitchIntegration.refreshAccessToken(credentials.refreshToken, {
+          clientId: this.oauthConfig.twitchClientId,
+          clientSecret: this.oauthConfig.twitchClientSecret,
+          redirectUri: '', // Not needed for refresh
+        });
+        newAccessToken = result.accessToken;
+        newExpiresIn = result.expiresIn;
+        // Twitch may return a new refresh token
+        if (result.refreshToken) {
+          credentials.refreshToken = result.refreshToken;
+        }
+      } else {
+        console.warn(`💬 ${conn.platform}: OAuth config not available for auto-refresh`);
+        return credentials.accessToken || null;
+      }
+
+      // Update credentials in the database
+      credentials.accessToken = newAccessToken;
+      const encryptedCredentials = encrypt(JSON.stringify(credentials), this.encryptionKey);
+
+      await this.db
+        .update(platformConnections)
+        .set({
+          credentials: encryptedCredentials,
+          tokenExpiresAt: new Date(Date.now() + newExpiresIn * 1000),
+          lastSyncAt: new Date(),
+          lastError: null,
+          status: 'healthy',
+        })
+        .where(eq(platformConnections.id, conn.id));
+
+      console.log(`💬 ${conn.platform}: token refreshed successfully, expires in ${newExpiresIn}s`);
+      return newAccessToken;
+    } catch (error) {
+      console.error(`💬 ${conn.platform}: token refresh failed:`, error instanceof Error ? error.message : error);
+      // Mark connection as degraded
+      await this.db
+        .update(platformConnections)
+        .set({
+          status: 'degraded',
+          lastError: `Token refresh failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        })
+        .where(eq(platformConnections.id, conn.id));
+      return null;
+    }
+  }
+
+  /**
    * Get connection configs for a creator from the database
    */
   private async getConnectionConfigs(creatorId: string): Promise<PlatformConfig[]> {
@@ -223,42 +330,47 @@ export class ChatService {
           }
           break;
 
-        case 'youtube':
-          if (credentials.accessToken) {
+        case 'youtube': {
+          // Auto-refresh token if expired
+          const ytToken = await this.refreshTokenIfExpired(conn);
+          if (ytToken) {
             configs.push({
               platform: 'youtube',
               enabled: true,
               config: {
                 creatorId,
-                accessToken: credentials.accessToken,
+                accessToken: ytToken,
               },
             });
             console.log(`💬 Added YouTube chat config for ${conn.displayName || conn.externalId}`);
           } else {
-            console.warn(`💬 YouTube: no accessToken available, skipping`);
+            console.warn(`💬 YouTube: no valid accessToken available, skipping`);
           }
           break;
+        }
 
         case 'twitch': {
+          // Auto-refresh token if expired
+          const twitchToken = await this.refreshTokenIfExpired(conn);
+
           // Twitch IRC needs the login name (lowercase), not the numeric user ID
-          // The login name is stored in metadata.login, and externalId is the numeric ID
           const twitchLogin = (metadata.login as string) || conn.displayName?.toLowerCase();
           const twitchUsername = conn.displayName || (metadata.login as string);
 
-          if (credentials.accessToken && twitchLogin) {
+          if (twitchToken && twitchLogin) {
             configs.push({
               platform: 'twitch',
               enabled: true,
               config: {
                 creatorId,
-                accessToken: credentials.accessToken,
+                accessToken: twitchToken,
                 username: twitchUsername!,
                 channelId: twitchLogin, // IRC channel = login name, NOT numeric ID
               },
             });
             console.log(`💬 Added Twitch chat config for #${twitchLogin} (${twitchUsername})`);
           } else {
-            console.warn(`💬 Twitch: missing accessToken or login name, skipping (has token: ${!!credentials.accessToken}, login: ${twitchLogin})`);
+            console.warn(`💬 Twitch: missing token or login name, skipping (has token: ${!!twitchToken}, login: ${twitchLogin})`);
           }
           break;
         }
@@ -299,9 +411,9 @@ export class ChatService {
 // Singleton instance
 let chatServiceInstance: ChatService | null = null;
 
-export function createChatService(db: Database, encryptionKey: string): ChatService {
+export function createChatService(db: Database, encryptionKey: string, oauthConfig?: OAuthConfig): ChatService {
   if (!chatServiceInstance) {
-    chatServiceInstance = new ChatService(db, encryptionKey);
+    chatServiceInstance = new ChatService(db, encryptionKey, oauthConfig);
   }
   return chatServiceInstance;
 }

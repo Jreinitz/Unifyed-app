@@ -22,7 +22,12 @@ const getMessagesQuerySchema = z.object({
 export async function chatRoutes(fastify: FastifyInstance) {
   // Ensure chat service is initialized
   if (!getChatService()) {
-    createChatService(fastify.db, env.CREDENTIALS_ENCRYPTION_KEY);
+    createChatService(fastify.db, env.CREDENTIALS_ENCRYPTION_KEY, {
+      youtubeClientId: env.YOUTUBE_CLIENT_ID,
+      youtubeClientSecret: env.YOUTUBE_CLIENT_SECRET,
+      twitchClientId: env.TWITCH_CLIENT_ID,
+      twitchClientSecret: env.TWITCH_CLIENT_SECRET,
+    });
   }
 
   await fastify.register(authPlugin);
