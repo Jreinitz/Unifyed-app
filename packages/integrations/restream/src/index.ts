@@ -252,6 +252,10 @@ export async function checkLiveStatus(
     },
   });
 
+  if (response.status === 401) {
+    throw new Error('RESTREAM_TOKEN_EXPIRED');
+  }
+
   if (!response.ok) {
     console.log(`Restream checkLiveStatus API returned ${response.status}`);
     return { isLive: false };

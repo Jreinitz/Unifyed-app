@@ -1,7 +1,7 @@
 import { Job } from 'bullmq';
 import * as nodeCrypto from 'crypto';
 import type { Database } from '@unifyed/db';
-import { liveSessions, streams } from '@unifyed/db';
+import { liveSessions, streams, streamingToolConnections } from '@unifyed/db';
 import { eq, and, inArray } from 'drizzle-orm';
 import * as restreamIntegration from '@unifyed/integrations-restream';
 import * as youtubeIntegration from '@unifyed/integrations-youtube';
@@ -22,6 +22,19 @@ interface StreamDetectionResult {
   newLiveSessions: number;
   endedSessions: number;
   errors: string[];
+}
+
+// Encrypt credentials using AES-256-GCM (matches @unifyed/utils encrypt)
+function encryptCredentials(data: Record<string, unknown>): string {
+  const encryptionKey = process.env['CREDENTIALS_ENCRYPTION_KEY'];
+  if (!encryptionKey) throw new Error('CREDENTIALS_ENCRYPTION_KEY not set');
+  const key = Buffer.from(encryptionKey, 'hex');
+  const iv = nodeCrypto.randomBytes(16);
+  const cipher = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
+  let encrypted = cipher.update(JSON.stringify(data), 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
 }
 
 // Decrypt credentials using the proper AES-256-GCM decryption
@@ -227,16 +240,69 @@ async function checkRestreamConnection(
     throw new Error(`Streaming tool connection ${toolConnectionId} not found`);
   }
   
-  const credentials = decryptCredentials(connection.credentials) as {
+  let credentials = decryptCredentials(connection.credentials) as {
     accessToken: string;
     refreshToken: string;
+    scope?: string;
   };
   
-  // Check live status via Restream API
-  const { isLive, broadcast } = await restreamIntegration.checkLiveStatus(
-    credentials.accessToken
-  );
+  // Check live status via Restream API (with auto-refresh on 401)
+  let liveResult: { isLive: boolean; broadcast?: restreamIntegration.RestreamBroadcast };
+  try {
+    liveResult = await restreamIntegration.checkLiveStatus(credentials.accessToken);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'RESTREAM_TOKEN_EXPIRED') {
+      // Token expired - refresh it
+      console.log(`🔄 Refreshing expired Restream token for ${connection.displayName}`);
+      try {
+        const newTokens = await restreamIntegration.refreshAccessToken(
+          credentials.refreshToken,
+          {
+            clientId: env.RESTREAM_CLIENT_ID || '',
+            clientSecret: env.RESTREAM_CLIENT_SECRET || '',
+            redirectUri: '', // Not needed for refresh
+          }
+        );
+        
+        // Update credentials in database
+        credentials = {
+          accessToken: newTokens.accessToken,
+          refreshToken: newTokens.refreshToken,
+          scope: newTokens.scope,
+        };
+        
+        const encryptedCreds = encryptCredentials(credentials);
+        await db.update(streamingToolConnections)
+          .set({
+            credentials: encryptedCreds,
+            tokenExpiresAt: new Date(Date.now() + newTokens.expiresIn * 1000),
+            updatedAt: new Date(),
+          })
+          .where(eq(streamingToolConnections.id, toolConnectionId));
+        
+        console.log(`✅ Restream token refreshed for ${connection.displayName}`);
+        
+        // Retry with new token
+        liveResult = await restreamIntegration.checkLiveStatus(credentials.accessToken);
+      } catch (refreshError) {
+        const msg = refreshError instanceof Error ? refreshError.message : 'Unknown error';
+        console.error(`❌ Restream token refresh failed for ${connection.displayName}: ${msg}`);
+        // Mark connection as needing reauth
+        await db.update(streamingToolConnections)
+          .set({
+            status: 'error',
+            lastError: `Token refresh failed: ${msg}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(streamingToolConnections.id, toolConnectionId));
+        throw new Error(`Token refresh failed: ${msg}`);
+      }
+    } else {
+      throw error;
+    }
+  }
   
+  const { isLive, broadcast } = liveResult;
   console.log(`📡 Restream ${connection.displayName}: ${isLive ? 'LIVE' : 'offline'}`);
   
   // Get current live session for this creator (if any)
