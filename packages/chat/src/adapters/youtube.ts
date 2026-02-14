@@ -71,7 +71,10 @@ export class YouTubeChatAdapter extends ChatAdapter {
     );
 
     if (!response.ok) {
-      throw new Error(`Failed to send YouTube message: ${response.status}`);
+      const errorBody = await response.json().catch(() => ({})) as { error?: { message?: string; errors?: Array<{ reason?: string; domain?: string }> } };
+      const reason = errorBody.error?.errors?.[0]?.reason || errorBody.error?.message || 'Unknown';
+      console.error(`▶️ YouTube send error ${response.status}: ${reason}`, JSON.stringify(errorBody.error || {}));
+      throw new Error(`Failed to send YouTube message: ${response.status} - ${reason}`);
     }
   }
 
