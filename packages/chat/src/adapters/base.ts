@@ -23,6 +23,8 @@ export interface ChatAdapterConfig {
   username?: string | undefined;
   channelId?: string | undefined;
   liveChatId?: string | undefined;
+  clientId?: string | undefined;
+  broadcasterId?: string | undefined;
 }
 
 /**

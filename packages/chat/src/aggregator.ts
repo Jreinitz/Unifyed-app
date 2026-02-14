@@ -117,6 +117,8 @@ export class ChatAggregator extends EventEmitter<ChatAggregatorEvents> {
             accessToken: string;
             username: string;
             channelId: string;
+            clientId: string;
+            broadcasterId: string;
           }
         );
         break;

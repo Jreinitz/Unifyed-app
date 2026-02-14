@@ -343,11 +343,12 @@ export class ChatService {
           // Auto-refresh token if expired
           const twitchToken = await this.refreshTokenIfExpired(conn);
 
-          // Twitch IRC needs the login name (lowercase), not the numeric user ID
+          // Twitch Helix API needs numeric broadcasterId and clientId
           const twitchLogin = (metadata['login'] as string) || conn.displayName?.toLowerCase();
           const twitchUsername = conn.displayName || (metadata['login'] as string);
+          const twitchBroadcasterId = conn.externalId; // Numeric Twitch user ID
 
-          if (twitchToken && twitchLogin) {
+          if (twitchToken && twitchLogin && twitchBroadcasterId && this.oauthConfig.twitchClientId) {
             configs.push({
               platform: 'twitch',
               enabled: true,
@@ -355,10 +356,12 @@ export class ChatService {
                 creatorId,
                 accessToken: twitchToken,
                 username: twitchUsername!,
-                channelId: twitchLogin, // IRC channel = login name, NOT numeric ID
+                channelId: twitchLogin,
+                clientId: this.oauthConfig.twitchClientId,
+                broadcasterId: twitchBroadcasterId,
               },
             });
-            console.log(`💬 Added Twitch chat config for #${twitchLogin} (${twitchUsername})`);
+            console.log(`💬 Added Twitch chat config for #${twitchLogin} (id: ${twitchBroadcasterId})`);
           } else {
             console.warn(`💬 Twitch: missing token or login name, skipping (has token: ${!!twitchToken}, login: ${twitchLogin})`);
           }
