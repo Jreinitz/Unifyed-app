@@ -382,6 +382,12 @@ function TemplateModal({ template, offers, products, onClose, onSaved }: Templat
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const getToken = async () => {
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
