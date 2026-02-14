@@ -27,7 +27,7 @@ export function generateAuthUrl(config: YouTubeOAuthConfig, state: string): stri
   const params = new URLSearchParams({
     client_id: config.clientId,
     response_type: 'code',
-    scope: 'https://www.googleapis.com/auth/youtube.readonly',
+    scope: 'https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl',
     redirect_uri: config.redirectUri,
     state,
     access_type: 'offline',
