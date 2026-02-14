@@ -72,12 +72,18 @@ export interface TwitchVideo {
  * - user:read:email: Read user email
  * - channel:read:stream_key: Read stream key
  * - user:read:broadcast: Read user broadcast config
+ * - user:write:chat: Send chat messages via Helix API
+ * - user:read:chat: Read chat messages
+ * - moderator:read:chatters: Read chatters list
  */
 export function generateAuthUrl(config: TwitchOAuthConfig, state: string): string {
   const scopes = [
     'user:read:email',
     'channel:read:stream_key',
     'user:read:broadcast',
+    'user:write:chat',
+    'user:read:chat',
+    'moderator:read:chatters',
   ].join(' ');
 
   const params = new URLSearchParams({
