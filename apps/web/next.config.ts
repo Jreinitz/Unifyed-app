@@ -10,8 +10,10 @@ export default withSentryConfig(nextConfig, {
   silent: true,
   // Upload source maps for better error readability
   widenClientFileUpload: true,
-  // Hide source maps from client bundles
-  hideSourceMaps: true,
+  // Configure source maps
+  sourcemaps: {
+    deleteSourcemapsAfterUpload: true,
+  },
   // Disable Sentry telemetry
   disableLogger: true,
 });
