@@ -194,15 +194,17 @@ export class ChatService {
       }
 
       // Decrypt credentials using AES-256-GCM
-      let credentials: { accessToken?: string; username?: string };
+      let credentials: { accessToken?: string; refreshToken?: string; username?: string; scope?: string };
       try {
         const decrypted = decrypt(conn.credentials || '', this.encryptionKey);
         credentials = JSON.parse(decrypted);
       } catch {
-        console.error(`Failed to decrypt ${conn.platform} credentials, skipping`);
+        console.error(`💬 Failed to decrypt ${conn.platform} credentials, skipping`);
         continue;
       }
 
+      // Parse metadata (may contain login name, profile info, etc.)
+      const metadata = (conn.metadata || {}) as Record<string, unknown>;
       const platform = conn.platform as ChatPlatform;
 
       switch (platform) {
@@ -217,6 +219,7 @@ export class ChatService {
                 username: conn.displayName,
               },
             });
+            console.log(`💬 Added TikTok chat config for ${conn.displayName}`);
           }
           break;
 
@@ -230,26 +233,39 @@ export class ChatService {
                 accessToken: credentials.accessToken,
               },
             });
+            console.log(`💬 Added YouTube chat config for ${conn.displayName || conn.externalId}`);
+          } else {
+            console.warn(`💬 YouTube: no accessToken available, skipping`);
           }
           break;
 
-        case 'twitch':
-          if (credentials.accessToken && credentials.username && conn.externalId) {
+        case 'twitch': {
+          // Twitch IRC needs the login name (lowercase), not the numeric user ID
+          // The login name is stored in metadata.login, and externalId is the numeric ID
+          const twitchLogin = (metadata.login as string) || conn.displayName?.toLowerCase();
+          const twitchUsername = conn.displayName || (metadata.login as string);
+
+          if (credentials.accessToken && twitchLogin) {
             configs.push({
               platform: 'twitch',
               enabled: true,
               config: {
                 creatorId,
                 accessToken: credentials.accessToken,
-                username: credentials.username,
-                channelId: conn.externalId,
+                username: twitchUsername!,
+                channelId: twitchLogin, // IRC channel = login name, NOT numeric ID
               },
             });
+            console.log(`💬 Added Twitch chat config for #${twitchLogin} (${twitchUsername})`);
+          } else {
+            console.warn(`💬 Twitch: missing accessToken or login name, skipping (has token: ${!!credentials.accessToken}, login: ${twitchLogin})`);
           }
           break;
+        }
       }
     }
 
+    console.log(`💬 Found ${platformConns.length} platform connection(s), built ${configs.length} chat config(s): ${configs.map(c => c.platform).join(', ') || 'none'}`);
     return configs;
   }
 
