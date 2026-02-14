@@ -13,10 +13,10 @@ import { processMessage } from './ai-chat.service.js';
  * Manages chat aggregators for each creator and provides unified chat access
  */
 interface OAuthConfig {
-  youtubeClientId?: string;
-  youtubeClientSecret?: string;
-  twitchClientId?: string;
-  twitchClientSecret?: string;
+  youtubeClientId?: string | undefined;
+  youtubeClientSecret?: string | undefined;
+  twitchClientId?: string | undefined;
+  twitchClientSecret?: string | undefined;
 }
 
 export class ChatService {
@@ -300,16 +300,6 @@ export class ChatService {
         continue;
       }
 
-      // Decrypt credentials using AES-256-GCM
-      let credentials: { accessToken?: string; refreshToken?: string; username?: string; scope?: string };
-      try {
-        const decrypted = decrypt(conn.credentials || '', this.encryptionKey);
-        credentials = JSON.parse(decrypted);
-      } catch {
-        console.error(`💬 Failed to decrypt ${conn.platform} credentials, skipping`);
-        continue;
-      }
-
       // Parse metadata (may contain login name, profile info, etc.)
       const metadata = (conn.metadata || {}) as Record<string, unknown>;
       const platform = conn.platform as ChatPlatform;
@@ -354,8 +344,8 @@ export class ChatService {
           const twitchToken = await this.refreshTokenIfExpired(conn);
 
           // Twitch IRC needs the login name (lowercase), not the numeric user ID
-          const twitchLogin = (metadata.login as string) || conn.displayName?.toLowerCase();
-          const twitchUsername = conn.displayName || (metadata.login as string);
+          const twitchLogin = (metadata['login'] as string) || conn.displayName?.toLowerCase();
+          const twitchUsername = conn.displayName || (metadata['login'] as string);
 
           if (twitchToken && twitchLogin) {
             configs.push({
