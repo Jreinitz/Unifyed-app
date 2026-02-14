@@ -26,6 +26,8 @@ export default function CommandCenterPage() {
   const [chatState, setChatState] = useState<ChatState | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [chatStarted, setChatStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offers, setOffers] = useState<Array<{ id: string; name: string; discount: string; active: boolean }>>([]);
   const [sessionStats, setSessionStats] = useState<SessionStatsData>({ 
@@ -36,6 +38,154 @@ export default function CommandCenterPage() {
   
   const wsRef = useRef<WebSocket | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const wsReconnectRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Handle incoming WebSocket messages
+  const handleWsMessage = useCallback((event: MessageEvent) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      switch (data.type) {
+        case 'message':
+          setMessages((prev) => [...prev, data.data]);
+          break;
+
+        case 'history':
+          setMessages(data.data);
+          break;
+
+        case 'state':
+          setChatState(data.data);
+          break;
+
+        case 'session_stats':
+          setSessionStats(data.data);
+          // Start duration timer if live
+          if (data.data.isLive && data.data.duration !== undefined) {
+            setSessionDuration(data.data.duration);
+            // Clear any existing interval
+            if (durationIntervalRef.current) {
+              clearInterval(durationIntervalRef.current);
+            }
+            // Update duration every second
+            durationIntervalRef.current = setInterval(() => {
+              setSessionDuration((prev) => prev + 1);
+            }, 1000);
+          } else if (!data.data.isLive && durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current);
+            durationIntervalRef.current = null;
+          }
+          break;
+
+        case 'sale_notification': {
+          // Show sale notification toast
+          const sale = data.data;
+          const amount = (sale.amount / 100).toFixed(2);
+          const notification = {
+            id: sale.orderId,
+            type: 'sale' as const,
+            message: `${sale.customerName} just purchased for $${amount}!`,
+            timestamp: sale.timestamp,
+          };
+          // Add to messages as a system message for visibility
+          setMessages((prev) => [...prev, {
+            id: `sale-${sale.orderId}`,
+            platform: 'system' as ChatPlatform,
+            type: 'system',
+            content: `💰 SALE! ${notification.message}`,
+            user: { username: 'Unifyed', displayName: 'Unifyed', avatar: undefined },
+            timestamp: new Date(sale.timestamp),
+            signals: undefined,
+          }]);
+          // Play notification sound
+          try {
+            const audio = new Audio('/sounds/sale.mp3');
+            audio.volume = 0.5;
+            audio.play().catch(() => {});
+          } catch {
+            // Audio might not be available
+          }
+          break;
+        }
+
+        case 'error':
+          console.error('Chat error:', data.message);
+          setError(data.message);
+          break;
+      }
+    } catch (err) {
+      console.error('Failed to parse WebSocket message:', err);
+    }
+  }, []);
+
+  // Connect WebSocket to API for session stats and chat messages
+  // This runs on page load - independent of "Connect Chat" button
+  useEffect(() => {
+    let mounted = true;
+
+    const connectWebSocket = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session || !mounted) return;
+
+        // Close existing connection
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
+
+        const wsUrl = `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/chat/ws?token=${session.access_token}`;
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          if (!mounted) { ws.close(); return; }
+          console.log('📡 Command Center WebSocket connected');
+          setWsConnected(true);
+          setError(null);
+        };
+
+        ws.onmessage = handleWsMessage;
+
+        ws.onerror = (event) => {
+          console.error('WebSocket error:', event);
+          setWsConnected(false);
+        };
+
+        ws.onclose = () => {
+          console.log('📡 Command Center WebSocket disconnected');
+          setWsConnected(false);
+          // Auto-reconnect after 5 seconds
+          if (mounted) {
+            wsReconnectRef.current = setTimeout(() => {
+              if (mounted) connectWebSocket();
+            }, 5000);
+          }
+        };
+
+        wsRef.current = ws;
+      } catch (err) {
+        console.error('Failed to connect WebSocket:', err);
+        // Retry after 5 seconds
+        if (mounted) {
+          wsReconnectRef.current = setTimeout(() => {
+            if (mounted) connectWebSocket();
+          }, 5000);
+        }
+      }
+    };
+
+    connectWebSocket();
+
+    return () => {
+      mounted = false;
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (wsReconnectRef.current) {
+        clearTimeout(wsReconnectRef.current);
+      }
+    };
+  }, [supabase, handleWsMessage]);
 
   // Fetch active offers
   useEffect(() => {
@@ -67,9 +217,12 @@ export default function CommandCenterPage() {
     fetchOffers();
   }, [supabase]);
 
-  // Auto-detect active live session on page load
+  // Auto-detect active live session on page load (fallback if WS doesn't connect)
   useEffect(() => {
     const checkLiveStatus = async () => {
+      // Skip polling if WS is connected - it handles session stats
+      if (wsConnected) return;
+
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
@@ -83,7 +236,6 @@ export default function CommandCenterPage() {
         if (response.ok) {
           const data = await response.json();
           if (data.isLive && data.session) {
-            // Calculate duration from session start time
             const startedAt = new Date(data.session.startedAt).getTime();
             const duration = Math.floor((Date.now() - startedAt) / 1000);
 
@@ -104,7 +256,6 @@ export default function CommandCenterPage() {
             });
             setSessionDuration(duration);
 
-            // Start duration timer
             if (durationIntervalRef.current) {
               clearInterval(durationIntervalRef.current);
             }
@@ -118,17 +269,19 @@ export default function CommandCenterPage() {
       }
     };
 
+    // Check immediately
     checkLiveStatus();
 
-    // Poll every 15 seconds in case stream goes live/offline while page is open
+    // Poll every 15 seconds as fallback
     const pollInterval = setInterval(checkLiveStatus, 15000);
 
     return () => {
       clearInterval(pollInterval);
     };
-  }, [supabase]);
+  }, [supabase, wsConnected]);
 
-  // Connect to chat WebSocket
+  // Start chat aggregation (Restream chat connection)
+  // This is separate from the WebSocket - it starts the actual chat bridge to Restream
   const connectChat = useCallback(async () => {
     try {
       setIsConnecting(true);
@@ -140,7 +293,7 @@ export default function CommandCenterPage() {
         return;
       }
 
-      // First, start chat via API
+      // Start chat aggregation via API
       const startResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/chat/start`, {
         method: 'POST',
         headers: {
@@ -150,124 +303,50 @@ export default function CommandCenterPage() {
 
       if (!startResponse.ok) {
         const data = await startResponse.json();
-        throw new Error(data.message || 'Failed to start chat');
+        const errorMsg = data.error?.message || data.message || 'Failed to start chat';
+        console.error('Chat start failed:', errorMsg);
+        setError(`Chat connection issue: ${errorMsg}. Live stats still active.`);
+        setIsConnecting(false);
+        return;
       }
 
-      // Connect to WebSocket
-      const wsUrl = `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/chat/ws?token=${session.access_token}`;
-      const ws = new WebSocket(wsUrl);
+      const result = await startResponse.json();
+      console.log('💬 Chat aggregation started:', result);
+      setChatStarted(true);
 
-      ws.onopen = () => {
-        console.log('💬 Chat WebSocket connected');
-        setIsConnecting(false);
-      };
+      // Update chat state from response
+      if (result.state) {
+        setChatState(result.state);
+      }
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          switch (data.type) {
-            case 'message':
-              setMessages((prev) => [...prev, data.data]);
-              break;
-
-            case 'history':
-              setMessages(data.data);
-              break;
-
-            case 'state':
-              setChatState(data.data);
-              break;
-
-            case 'session_stats':
-              setSessionStats(data.data);
-              // Start duration timer if live
-              if (data.data.isLive && data.data.duration !== undefined) {
-                setSessionDuration(data.data.duration);
-                // Clear any existing interval
-                if (durationIntervalRef.current) {
-                  clearInterval(durationIntervalRef.current);
-                }
-                // Update duration every second
-                durationIntervalRef.current = setInterval(() => {
-                  setSessionDuration((prev) => prev + 1);
-                }, 1000);
-              } else if (!data.data.isLive && durationIntervalRef.current) {
-                clearInterval(durationIntervalRef.current);
-                durationIntervalRef.current = null;
-              }
-              break;
-
-            case 'sale_notification': {
-              // Show sale notification toast
-              const sale = data.data;
-              const amount = (sale.amount / 100).toFixed(2);
-              const notification = {
-                id: sale.orderId,
-                type: 'sale' as const,
-                message: `${sale.customerName} just purchased for $${amount}!`,
-                timestamp: sale.timestamp,
-              };
-              // Add to messages as a system message for visibility
-              setMessages((prev) => [...prev, {
-                id: `sale-${sale.orderId}`,
-                platform: 'system' as ChatPlatform,
-                type: 'system',
-                content: `💰 SALE! ${notification.message}`,
-                user: { username: 'Unifyed', displayName: 'Unifyed', avatar: undefined },
-                timestamp: new Date(sale.timestamp),
-                signals: undefined,
-              }]);
-              // Play notification sound
-              try {
-                const audio = new Audio('/sounds/sale.mp3');
-                audio.volume = 0.5;
-                audio.play().catch(() => {});
-              } catch {
-                // Audio might not be available
-              }
-              break;
-            }
-
-            case 'error':
-              console.error('Chat error:', data.message);
-              setError(data.message);
-              break;
-          }
-        } catch (err) {
-          console.error('Failed to parse WebSocket message:', err);
-        }
-      };
-
-      ws.onerror = (event) => {
-        console.error('WebSocket error:', event);
-        setError('Connection error. Please try again.');
-        setIsConnecting(false);
-      };
-
-      ws.onclose = () => {
-        console.log('💬 Chat WebSocket disconnected');
-        setChatState(null);
-        setIsConnecting(false);
-      };
-
-      wsRef.current = ws;
+      setIsConnecting(false);
     } catch (err) {
       console.error('Failed to connect chat:', err);
-      setError(err instanceof Error ? err.message : 'Failed to connect');
+      setError(err instanceof Error ? `Chat error: ${err.message}. Live stats still active.` : 'Failed to connect chat');
       setIsConnecting(false);
     }
   }, [supabase]);
 
   // Disconnect chat
   const disconnectChat = useCallback(async () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        // Stop chat aggregation on API side
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/chat/stop`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }).catch(() => {});
+      }
+    } catch {
+      // Ignore errors on disconnect
     }
     setChatState(null);
+    setChatStarted(false);
     setMessages([]);
-  }, []);
+  }, [supabase]);
 
   // Send message
   const sendMessage = useCallback((content: string, platforms?: ChatPlatform[]) => {
@@ -277,10 +356,23 @@ export default function CommandCenterPage() {
         content,
         platforms,
       }));
+
+      // Optimistic: show the message locally immediately
+      setMessages((prev) => [...prev, {
+        id: `local-${Date.now()}`,
+        platform: 'restream' as ChatPlatform,
+        type: 'chat',
+        content,
+        user: { username: 'You', displayName: 'You', avatar: undefined },
+        timestamp: new Date(),
+        signals: undefined,
+      }]);
+    } else {
+      setError('WebSocket not connected. Try refreshing the page.');
     }
   }, []);
 
-  // Handle pin offer - calls API to create trackable link and send to chat
+  // Handle pin offer
   const handlePinOffer = useCallback(async (offerId: string) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -303,7 +395,6 @@ export default function CommandCenterPage() {
         throw new Error(data.error?.message || 'Failed to pin offer');
       }
 
-      // Success - the API handles sending the message to chat
       console.log('Offer pinned successfully');
     } catch (err) {
       console.error('Failed to pin offer:', err);
@@ -311,7 +402,7 @@ export default function CommandCenterPage() {
     }
   }, [supabase]);
 
-  // Handle drop link - calls API to create trackable link and send to chat
+  // Handle drop link
   const handleDropLink = useCallback(async (offerId: string) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -334,7 +425,6 @@ export default function CommandCenterPage() {
         throw new Error(data.error?.message || 'Failed to drop link');
       }
 
-      // Success - the API handles sending the message to chat
       console.log('Link dropped successfully');
     } catch (err) {
       console.error('Failed to drop link:', err);
@@ -342,7 +432,7 @@ export default function CommandCenterPage() {
     }
   }, [supabase]);
 
-  // Handle flash sale - calls API to create flash sale record and send to chat
+  // Handle flash sale
   const handleFlashSale = useCallback(async (offerId: string, duration: number) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -360,7 +450,7 @@ export default function CommandCenterPage() {
         body: JSON.stringify({ 
           offerId, 
           durationMinutes: duration,
-          additionalDiscount: 10, // Default additional 10% off for flash sales
+          additionalDiscount: 10,
         }),
       });
 
@@ -369,7 +459,6 @@ export default function CommandCenterPage() {
         throw new Error(data.error?.message || 'Failed to start flash sale');
       }
 
-      // Success - the API handles sending the announcement and scheduling end
       console.log('Flash sale started successfully');
     } catch (err) {
       console.error('Failed to start flash sale:', err);
@@ -380,9 +469,6 @@ export default function CommandCenterPage() {
   // Clean up on unmount
   useEffect(() => {
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
@@ -390,7 +476,7 @@ export default function CommandCenterPage() {
   }, []);
 
   const isSessionLive = sessionStats.isLive || false;
-  const isChatConnected = !!chatState?.isLive;
+  const isChatConnected = chatStarted || !!chatState?.isLive;
   const isLive = isSessionLive || isChatConnected;
 
   return (
@@ -405,6 +491,14 @@ export default function CommandCenterPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* WebSocket connection indicator */}
+          <div className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${
+            wsConnected ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
+            {wsConnected ? 'Connected' : 'Reconnecting...'}
+          </div>
+
           {isChatConnected ? (
             <button
               onClick={disconnectChat}
@@ -430,8 +524,14 @@ export default function CommandCenterPage() {
 
       {/* Error message */}
       {error && (
-        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400">
-          {error}
+        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 flex items-center justify-between">
+          <span>{error}</span>
+          <button 
+            onClick={() => setError(null)}
+            className="text-red-400 hover:text-red-300 ml-4 text-sm"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -466,7 +566,6 @@ export default function CommandCenterPage() {
             onSendMessage={sendMessage}
             onPinProduct={(msg) => {
               console.log('Pin product from message:', msg);
-              // Would open product picker
             }}
           />
         </div>

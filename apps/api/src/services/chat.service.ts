@@ -39,8 +39,11 @@ export class ChatService {
     const configs = await this.getConnectionConfigs(creatorId);
     
     if (configs.length === 0) {
+      console.warn(`💬 No chat connections available for creator ${creatorId}`);
       throw new Error('No chat connections available. Connect a streaming platform or Restream first.');
     }
+
+    console.log(`💬 Starting chat with ${configs.length} connection(s): ${configs.map(c => c.platform).join(', ')}`);
 
     // Create aggregator
     const aggregator = createChatAggregator(creatorId);
@@ -64,11 +67,18 @@ export class ChatService {
     });
 
     aggregator.on('error', (error, platform) => {
-      console.error(`Chat error for creator ${creatorId}${platform ? ` on ${platform}` : ''}:`, error);
+      console.error(`💬 Chat error for creator ${creatorId}${platform ? ` on ${platform}` : ''}:`, error.message);
     });
 
-    // Connect to platforms
-    await aggregator.connect(configs);
+    // Connect to platforms - don't throw if connection fails
+    // The aggregator will still be usable, just without chat messages
+    try {
+      await aggregator.connect(configs);
+      console.log(`💬 Chat aggregation connected for creator ${creatorId}`);
+    } catch (connectError) {
+      console.error(`💬 Chat platform connection failed (non-fatal):`, connectError instanceof Error ? connectError.message : connectError);
+      // Still register the aggregator - it can retry or the WS stats still work
+    }
     
     this.aggregators.set(creatorId, aggregator);
     console.log(`💬 Started chat aggregation for creator ${creatorId}`);
