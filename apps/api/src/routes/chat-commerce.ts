@@ -4,7 +4,7 @@ import { eq, and, gte } from 'drizzle-orm';
 import { AppError, ErrorCodes } from '@unifyed/utils';
 import { authPlugin } from '../plugins/auth.js';
 import { getChatService } from '../services/chat.service.js';
-import { offers, shortLinks, flashSales, attributionContexts } from '@unifyed/db/schema';
+import { offers, shortLinks, flashSales, attributionContexts, liveSessions } from '@unifyed/db/schema';
 import { randomBytes } from 'crypto';
 
 // Request schemas
@@ -45,11 +45,22 @@ export async function chatCommerceRoutes(fastify: FastifyInstance) {
   ): Promise<{ code: string; linkId: string }> {
     const code = randomBytes(4).toString('hex');
 
-    // Create attribution context
+    // Find the active live session for attribution
+    const [activeSession] = await fastify.db
+      .select({ id: liveSessions.id })
+      .from(liveSessions)
+      .where(and(
+        eq(liveSessions.creatorId, creatorId),
+        eq(liveSessions.status, 'live')
+      ))
+      .limit(1);
+
+    // Create attribution context linked to the live session
     const [attrCtx] = await fastify.db
       .insert(attributionContexts)
       .values({
         creatorId,
+        liveSessionId: activeSession?.id || null,
         platform: null, // Will be determined on click
         surface: 'live',
         metadata: { source, chatCommerce: true },

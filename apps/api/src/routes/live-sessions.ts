@@ -1125,6 +1125,7 @@ export async function liveSessionsRoutes(fastify: FastifyInstance) {
         .insert(attributionContexts)
         .values({
           creatorId: request.creator.id,
+          liveSessionId: id,
           platform: null,
           surface: 'live',
           metadata: { source: 'product_queue', sessionId: id },
