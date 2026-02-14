@@ -3,6 +3,7 @@ import type { ChatMessage, ChatConnectionStatus, ChatState, ChatPlatform } from 
 import type { Database } from '@unifyed/db';
 import { eq, and } from 'drizzle-orm';
 import { platformConnections } from '@unifyed/db/schema';
+import { decrypt } from '@unifyed/utils';
 import { processMessage } from './ai-chat.service.js';
 
 /**
@@ -14,7 +15,7 @@ export class ChatService {
   private messageCallbacks: Map<string, Set<(message: ChatMessage) => void>> = new Map();
   private stateCallbacks: Map<string, Set<(state: ChatState) => void>> = new Map();
 
-  constructor(private db: Database) {}
+  constructor(private db: Database, private encryptionKey: string) {}
 
   /**
    * Get or create a chat aggregator for a creator
@@ -165,7 +166,7 @@ export class ChatService {
 
     // Check for Restream connection (preferred)
     const restreamConn = await this.db.query.streamingToolConnections.findFirst({
-      where: (t, { eq: whereEq, and: whereAnd }) => whereAnd(
+      where: (t: any, { eq: whereEq, and: whereAnd }: any) => whereAnd(
         whereEq(t.creatorId, creatorId),
         whereEq(t.tool, 'restream'),
         whereEq(t.status, 'connected')
@@ -173,14 +174,15 @@ export class ChatService {
     });
 
     if (restreamConn) {
-      // Decrypt credentials
+      // Decrypt credentials using AES-256-GCM
       let credentials: { accessToken: string };
       try {
-        credentials = JSON.parse(
-          Buffer.from(restreamConn.credentials, 'base64').toString('utf-8')
-        );
-      } catch {
-        credentials = JSON.parse(restreamConn.credentials);
+        const decrypted = decrypt(restreamConn.credentials, this.encryptionKey);
+        credentials = JSON.parse(decrypted);
+      } catch (err) {
+        console.error('Failed to decrypt Restream credentials:', err);
+        // Skip this connection if decryption fails
+        return configs;
       }
 
       configs.push({
@@ -211,14 +213,14 @@ export class ChatService {
         continue;
       }
 
-      // Decrypt credentials
+      // Decrypt credentials using AES-256-GCM
       let credentials: { accessToken?: string; username?: string };
       try {
-        credentials = JSON.parse(
-          Buffer.from(conn.credentials || '', 'base64').toString('utf-8')
-        );
+        const decrypted = decrypt(conn.credentials || '', this.encryptionKey);
+        credentials = JSON.parse(decrypted);
       } catch {
-        credentials = conn.credentials ? JSON.parse(conn.credentials) : {};
+        console.error(`Failed to decrypt ${conn.platform} credentials, skipping`);
+        continue;
       }
 
       const platform = conn.platform as ChatPlatform;
@@ -301,9 +303,9 @@ export class ChatService {
 // Singleton instance
 let chatServiceInstance: ChatService | null = null;
 
-export function createChatService(db: Database): ChatService {
+export function createChatService(db: Database, encryptionKey: string): ChatService {
   if (!chatServiceInstance) {
-    chatServiceInstance = new ChatService(db);
+    chatServiceInstance = new ChatService(db, encryptionKey);
   }
   return chatServiceInstance;
 }

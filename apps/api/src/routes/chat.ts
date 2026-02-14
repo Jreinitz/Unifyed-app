@@ -5,6 +5,7 @@ import { AppError, ErrorCodes } from '@unifyed/utils';
 import { authPlugin } from '../plugins/auth.js';
 import { getChatService, createChatService } from '../services/chat.service.js';
 import { liveSessions, orders, checkoutSessions, attributionContexts } from '@unifyed/db/schema';
+import { env } from '../config/env.js';
 import type { ChatMessage, ChatState, ChatPlatform } from '@unifyed/types';
 
 // Request schemas
@@ -21,7 +22,7 @@ const getMessagesQuerySchema = z.object({
 export async function chatRoutes(fastify: FastifyInstance) {
   // Ensure chat service is initialized
   if (!getChatService()) {
-    createChatService(fastify.db);
+    createChatService(fastify.db, env.CREDENTIALS_ENCRYPTION_KEY);
   }
 
   await fastify.register(authPlugin);

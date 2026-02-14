@@ -67,6 +67,67 @@ export default function CommandCenterPage() {
     fetchOffers();
   }, [supabase]);
 
+  // Auto-detect active live session on page load
+  useEffect(() => {
+    const checkLiveStatus = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/live-sessions/status`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.isLive && data.session) {
+            // Calculate duration from session start time
+            const startedAt = new Date(data.session.startedAt).getTime();
+            const duration = Math.floor((Date.now() - startedAt) / 1000);
+
+            setSessionStats({
+              isLive: true,
+              sessionId: data.session.id,
+              title: data.session.title,
+              duration,
+              stats: {
+                revenue: 0,
+                orders: 0,
+                checkouts: 0,
+                conversionRate: 0,
+                totalViewers: data.session.totalPeakViewers || 0,
+                peakViewers: data.session.totalPeakViewers || 0,
+                viewsByPlatform: data.session.viewsByPlatform || {},
+              },
+            });
+            setSessionDuration(duration);
+
+            // Start duration timer
+            if (durationIntervalRef.current) {
+              clearInterval(durationIntervalRef.current);
+            }
+            durationIntervalRef.current = setInterval(() => {
+              setSessionDuration((prev) => prev + 1);
+            }, 1000);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to check live status:', err);
+      }
+    };
+
+    checkLiveStatus();
+
+    // Poll every 15 seconds in case stream goes live/offline while page is open
+    const pollInterval = setInterval(checkLiveStatus, 15000);
+
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [supabase]);
+
   // Connect to chat WebSocket
   const connectChat = useCallback(async () => {
     try {
@@ -328,7 +389,9 @@ export default function CommandCenterPage() {
     };
   }, []);
 
-  const isLive = chatState?.isLive || false;
+  const isSessionLive = sessionStats.isLive || false;
+  const isChatConnected = !!chatState?.isLive;
+  const isLive = isSessionLive || isChatConnected;
 
   return (
     <div className="min-h-screen bg-gray-950 p-6">
@@ -342,7 +405,7 @@ export default function CommandCenterPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {isLive ? (
+          {isChatConnected ? (
             <button
               onClick={disconnectChat}
               className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
@@ -353,9 +416,13 @@ export default function CommandCenterPage() {
             <button
               onClick={connectChat}
               disabled={isConnecting}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+              className={`px-4 py-2 text-white rounded-lg disabled:opacity-50 transition-colors font-medium ${
+                isSessionLive 
+                  ? 'bg-green-600 hover:bg-green-700 animate-pulse' 
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
-              {isConnecting ? 'Connecting...' : 'Connect Chat'}
+              {isConnecting ? 'Connecting...' : isSessionLive ? 'Connect Chat (LIVE!)' : 'Connect Chat'}
             </button>
           )}
         </div>
